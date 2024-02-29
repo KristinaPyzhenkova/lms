@@ -1,0 +1,26 @@
+POST http://127.0.0.1:8000/api/user/
+Content-Type: application/json
+
+{
+    "email": "test3@mail.ru",
+    "password": "1234556!K"
+}
+
+###
+POST http://127.0.0.1:8000/api/password_reset/confirm/?token=de1d4798128b333ff8db55f
+Content-Type: application/json
+
+{
+  "password": "116699Kckc!",
+  "token": "de1d4798128b333ff8db55f"
+}
+# 4de1a5063d6c59433e5363016e481f5fa14c86a8
+
+###
+POST http://127.0.0.1:8000/api/user/subscription/
+Authorization: Token a504075e45a7bac0f36391cb6f056210540bba2a
+Content-Type: application/json
+
+{
+    "subscription_type": "yearly"
+}
