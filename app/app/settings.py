@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-i0s&6^ksd6$ts60n%5)x=kmx7o46h%%z7)1u!&q1(#ubckfc1z"
 DEBUG = True
 
-ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1 localhost db").split(" ")
+ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1 localhost db 185.247.185.219").split(" ")
 
 SITE_DOMAIN = os.getenv("SITE_DOMAIN", None)
 
@@ -28,11 +28,8 @@ CORS_ALLOW_HEADERS = (
 
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3001",
-    "https://wonder-tales.netlify.app",
-    "https://wonder-tales.ru",
-    "https://dev.wonder-tales.ru",
-    "https://wondertales.io",
+    "http://localhost:8080",
+    # "https://wonder-tales.netlify.app",
 ]
 
 CORS_ALLOW_ALL_ORIGINS = False
@@ -61,7 +58,7 @@ INSTALLED_APPS = [
     "djoser",
     "drf_yasg",
     "django_rest_passwordreset",
-    "django_celery_beat",
+    # "django_celery_beat",
     "corsheaders",
     "lms",
     "nested_admin",
@@ -265,10 +262,10 @@ DATETIME_FORMATTER = '%d/%b/%Y %H:%M:%S'
 LOG_FORMATTER = (
     '[%(asctime)s] %(levelname)s: %(filename)s:%(funcName)s %(message)s'
 )
-# LOG_FILE = os.path.join(BASE_DIR, 'wonder_tales', 'logs', 'rosa_web')
-# LOG_FILE_WATCHED = os.path.join(BASE_DIR, 'wonder_tales', 'logs', f'watched_file')
-LOG_FILE = os.path.join('/home/app/logs', 'lms.log')
-LOG_FILE_WATCHED = os.path.join('/home/app/logs', 'watched_file.log')
+LOG_FILE = os.path.join('/root/lms/app/logs', 'lms.log')
+LOG_FILE_WATCHED = os.path.join('/home/lms/app/logs', 'watched_file.log')
+# LOG_FILE = os.path.join('/home/app/logs', 'lms.log')
+# LOG_FILE_WATCHED = os.path.join('/home/app/logs', 'watched_file.log')
 
 LOGGING = {
     'version': 1,
@@ -285,15 +282,15 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'console',
         },
-        # 'timed_rotating_file': {
-        #     'level': 'DEBUG',
-        #     'class': 'logging.handlers.TimedRotatingFileHandler',
-        #     'filename': LOG_FILE,
-        #     'formatter': 'console',
-        #     'when': 'midnight',
-        #     'interval': 1,
-        #     'backupCount': 7,
-        # },
+        'timed_rotating_file': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
+            'filename': LOG_FILE,
+            'formatter': 'console',
+            'when': 'midnight',
+            'interval': 1,
+            'backupCount': 7,
+        },
         # 'watched_file': {
         #     'level': 'DEBUG',
         #     'class': 'logging.handlers.WatchedFileHandler',
@@ -302,12 +299,12 @@ LOGGING = {
         # },
     },
     'loggers': {
-        # 'main': {
-        #     'level': 'DEBUG',
-        #     'handlers': ['console', 'timed_rotating_file', 'watched_file'],
-        #     'propagate': False,
-        # },
         'main': {
+            'level': 'DEBUG',
+            'handlers': ['console', 'timed_rotating_file'],
+            'propagate': False,
+        },
+        '': {
             'level': 'INFO',
             'handlers': ['console'],
             'propagate': False,
