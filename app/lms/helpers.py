@@ -14,14 +14,14 @@ import traceback
 from typing import Optional
 from datetime import timedelta
 
-import boto3
-import telegram
+# import boto3
+# import telegram
 from PIL import Image
 from io import BytesIO
 
 from django.urls import reverse
 from django.utils.html import format_html
-from django_celery_beat.models import IntervalSchedule, PeriodicTask
+# from django_celery_beat.models import IntervalSchedule, PeriodicTask
 from django.utils import timezone
 
 from lms import const
@@ -258,12 +258,12 @@ def log_error(err_msg: str):
     logger.error(err_msg)
 
 
-def log_info(info_msg: str, log_to_telegram=False):
+def log_info(info_msg: str):
     logger.info(info_msg)
-    if log_to_telegram:
-        telegram_bot_send_msg(
-            info_msg
-        )
+    # if log_to_telegram:
+    #     telegram_bot_send_msg(
+    #         info_msg
+    #     )
 
 
 def strip_stacktrace(exc: Union[str, Exception]) -> str:
@@ -338,25 +338,25 @@ def telegram_bot_send_msg(text: str = None,
             )
 
 
-def get_or_create_then_update_task(name: str,
-                                   task: str,
-                                   schedule: Optional[IntervalSchedule] = None,
-                                   one_off: bool = False,
-                                   kwargs: Optional[str] = None) -> PeriodicTask:
-    periodic_task = PeriodicTask.objects.filter(name=name).first()
-    if periodic_task:
-        periodic_task.interval = schedule
-        periodic_task.task = task
-        periodic_task.one_off = one_off
-        periodic_task.kwargs = kwargs or '{}'
-        periodic_task.save()
-    else:
-        periodic_task, _ = PeriodicTask.objects.get_or_create(
-            interval=schedule,
-            name=name,
-            task=task,
-            one_off=one_off,
-            kwargs=kwargs or '{}',
-        )
+# def get_or_create_then_update_task(name: str,
+#                                    task: str,
+#                                    schedule: Optional[IntervalSchedule] = None,
+#                                    one_off: bool = False,
+#                                    kwargs: Optional[str] = None) -> PeriodicTask:
+#     periodic_task = PeriodicTask.objects.filter(name=name).first()
+#     if periodic_task:
+#         periodic_task.interval = schedule
+#         periodic_task.task = task
+#         periodic_task.one_off = one_off
+#         periodic_task.kwargs = kwargs or '{}'
+#         periodic_task.save()
+#     else:
+#         periodic_task, _ = PeriodicTask.objects.get_or_create(
+#             interval=schedule,
+#             name=name,
+#             task=task,
+#             one_off=one_off,
+#             kwargs=kwargs or '{}',
+#         )
 
-    return periodic_task
+#     return periodic_task

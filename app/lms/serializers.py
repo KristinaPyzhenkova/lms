@@ -84,6 +84,7 @@ class ProfileSerializer(serializers.ModelSerializer):
         model = models.User
         fields = (
             'id',
+            'course',
             'email',
             'email_personal',
             'role',
@@ -93,7 +94,6 @@ class ProfileSerializer(serializers.ModelSerializer):
             'city',
             'state',
             'zip_val',
-            'password',
             'phone_number',
         )
 
@@ -147,3 +147,54 @@ class ListCommunicationSerializer(serializers.ModelSerializer):
         sender = models.User.objects.get(pk=pk)
         recipient = self.context['request'].user
         return models.Communication.objects.filter(sender=sender, recipient=recipient, is_read=False).count()
+
+
+class ContactsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.Contacts
+        fields = ['id', 'course', 'phone_number', 'email', 'first_name', 'last_name', 'additional', 'activity']
+
+
+class CourseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.Course
+        fields = ['id', 'name', 'description']
+    
+    def create(self, validated_data):
+        user = self.context['request'].user
+        course_new = models.Course.objects.create(**validated_data)
+        user.course.add(course_new)
+        return course_new
+
+
+class ManagerStudentSerializer(serializers.ModelSerializer):
+    # email = serializers.EmailField(source='user.email')
+    # first_name = serializers.CharField(source='user.first_name')
+    # last_name = serializers.CharField(source='user.last_name')
+    # phone_number = serializers.CharField(source='user.phone_number')
+    course_name = serializers.SerializerMethodField()
+    messages_count = serializers.SerializerMethodField()
+    tasks_progress = serializers.SerializerMethodField()
+    lectures_progress = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.User
+        fields = ['first_name', 'last_name', 'email', 'phone_number', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress']
+
+    def get_course_name(self, obj):
+        return ", ".join([course.name for course in obj.course.all()])
+
+    def get_messages_count(self, obj):
+        sender = self.context['request'].user
+        return models.Communication.objects.filter(sender=sender, recipient=obj).count()
+
+    def get_tasks_progress(self, obj):
+        total_tasks = models.TaskSolution.objects.filter(student=obj).count()
+        completed_tasks = models.TaskSolution.objects.filter(student=obj, is_completed=True).count()
+        return f"{completed_tasks}/{total_tasks}"
+
+    def get_lectures_progress(self, obj):
+        total_modules = models.ModuleCompletion.objects.filter(student=obj)
+        # completed_modules = models.ModuleCompletion.objects.filter(student=obj, is_completed=True).count()
+        completed_modules = 0
+        return f"{completed_modules}/{total_modules.count()}"

@@ -11,14 +11,15 @@ from lms import models
 
 class CourseAdminForm(forms.ModelForm):
     class Meta:
-        model = models.Course
+        model = models.User
         fields = '__all__'
 
-    managers = forms.ModelMultipleChoiceField(
-        queryset=models.User.objects.filter(role=models.User.STUDENT),
+    course = forms.ModelMultipleChoiceField(
+        queryset=models.Course.objects.all(),
         required=False,
-        widget=FilteredSelectMultiple('Users', is_stacked=False)
+        widget=FilteredSelectMultiple('Course', is_stacked=False)
     )
+
 
 
 @admin.register(models.User)
@@ -49,7 +50,7 @@ class UserAdmin(admin.ModelAdmin):
     def course_list(self, obj):
         return ", ".join([str(course) for course in obj.course.all()])
 
-    course_list.short_description = 'course'
+    course_list.short_description = 'courses'
 
 
 @admin.register(models.Course)
@@ -155,11 +156,13 @@ class ContactsAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'user',
+        # 'course',
         'phone_number',
         'email',
         'first_name',
         'last_name',
         'additional',
+        'activity',
     )
     search_fields = ('user__email', 'email')
     empty_value_display = '-пусто-'

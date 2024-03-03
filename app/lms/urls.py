@@ -8,6 +8,7 @@ from lms import views
 router = SimpleRouter()
 router.register('user', views.UserViewSet, basename='user')
 router.register('message', views.CommunicationViewSet, basename='message')
+router.register('course', views.CourseViewSet, basename='course')
 
 
 urlpatterns = [
@@ -17,6 +18,9 @@ urlpatterns = [
     # path('auth/token/logout', views_djoser.TokenDestroyView.as_view(), name='logout'),
     path('auth/', include('djoser.urls.jwt')),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
+    path('dashboard/', views.ManagerStudentsView.as_view(), name='manager_students'),
+    # path('courses/<int:course_id>/contacts/', views.ContactsViewSet.as_view({'post': 'create', 'get': 'list'})),
+    # path('courses/<int:course_id>/contacts/<int:pk>/', views.ContactsViewSet.as_view({'get': 'retrieve', 'put': 'update'})),
 ]
 
 if settings.DEBUG:

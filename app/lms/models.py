@@ -271,6 +271,7 @@ class ModuleCompletion(CommonFields):
 
 class Contacts(CommonFields):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
+    course = models.ForeignKey(Course, related_name='contact_course', on_delete=models.CASCADE)
     phone_number = models.CharField(
         max_length=16,
         blank=True,
@@ -297,6 +298,11 @@ class Contacts(CommonFields):
         null=True,
     )
     additional = models.CharField(
+        max_length=250,
+        blank=True,
+        null=True,
+    )
+    activity = models.CharField(
         max_length=250,
         blank=True,
         null=True,
