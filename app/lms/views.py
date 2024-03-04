@@ -254,7 +254,8 @@ class CommunicationViewSet(viewsets.ViewSet):
         communications = self.get_queryset().filter(
             Q(sender=pk) | Q(recipient=pk)
         ).order_by('created')
-        sent_serializer = serializers.ListCommunicationSerializer([communications], many=True, context={'request': request, 'pk': pk})
+        sent_serializer = serializers.ListCommunicationSerializer([communications], many=True,
+                                                                  context={'request': request, 'pk': pk})
         response = Response(sent_serializer.data, status=status.HTTP_200_OK)
         received_messages = communications.filter(recipient=request.user)
         received_messages.update(is_read=True, reading_time=timezone.now())
@@ -418,7 +419,7 @@ class CourseViewSet(viewsets.ModelViewSet):
             return [IsMentor()]
         else:
             return [permissions.IsAuthenticated()]
-    
+
     def get_queryset(self):
         user = self.request.user
         queryset = user.course.all()
@@ -580,7 +581,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         course_id = pk
         try:
             contact = models.Contacts.objects.get(pk=contacts_id, course_id=course_id)
-        except Contacts.DoesNotExist:
+        except models.Contacts.DoesNotExist:
             return Response({'message': 'Контакт не найден'}, status=404)
 
         if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
