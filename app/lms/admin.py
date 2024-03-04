@@ -156,7 +156,7 @@ class ContactsAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'user',
-        # 'course',
+        'country',
         'phone_number',
         'email',
         'first_name',

@@ -27,7 +27,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from lms import serializers, models, const
-from lms.helpers import handle_exceptions, generate_password
+from lms.helpers import handle_exceptions, generate_password, log_info
 from lms.permissions import IsMentor, CanView
 
 
@@ -162,7 +162,7 @@ class UserViewSet(viewsets.ViewSet):
         user_data = request.data
         user_data['email'] = const.template_email.format(user_data['first_name'], user_data['last_name'])
         user_data['password'] = generate_password()
-        helpers.log_info(f"{user_data['password'] = } {user_data['email'] = }")
+        log_info(f"{user_data['password'] = } {user_data['email'] = }")
         serializer = serializers.NewUserSerializer(
             data=user_data,
             context={'request': request}
@@ -218,7 +218,6 @@ class CommunicationViewSet(viewsets.ViewSet):
         },
     )
     def create(self, request):
-        print(request.data)
         recipient_id = request.data.get('recipient')
         message = request.data.get('message')
         if not recipient_id or not message:
@@ -260,158 +259,35 @@ class CommunicationViewSet(viewsets.ViewSet):
         received_messages = communications.filter(recipient=request.user)
         received_messages.update(is_read=True, reading_time=timezone.now())
         return response
+    
+    @action(
+        detail=False,
+        methods=['GET'],
+        url_path='user',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description='HTTP_200_OK',
+                schema=serializers.ListUserCommunicationSerializer(),
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def view_user(self, request):
+        """Просмотр юзеров с кем начата переписка."""
+        user = self.request.user
+        users_with_communication = models.User.objects.filter(
+            Q(sent_messages__recipient=user) | Q(received_messages__sender=user)
+        ).distinct()
+        sent_serializer = serializers.ListUserCommunicationSerializer(users_with_communication, many=True)
+        return Response(sent_serializer.data, status=status.HTTP_200_OK)
 
-
-# class ContactsViewSet(viewsets.ModelViewSet):
-#     queryset = models.Contacts.objects.all()
-#     permission_classes = [permissions.IsAuthenticated]
-
-#     @swagger_auto_schema(
-#         request_body=openapi.Schema(
-#             type=openapi.TYPE_OBJECT,
-#             properties={
-#                 'phone_number': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='phone_number',
-#                     example='+79811110011'
-#                 ),
-#                 'email': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='email',
-#                     example='email@mail.ru'
-#                 ),
-#                 'first_name': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='first_name',
-#                     example="Test"
-#                 ),
-#                 'last_name': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='last_name',
-#                     example="last_name"
-#                 ),
-#                 'additional': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='additional',
-#                     example="additional"
-#                 ),
-#                 'activity': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='activity',
-#                     example="activity"
-#                 ),
-#             },
-#         ),
-#         responses={
-#             201: openapi.Response(
-#                 description='OK',
-#             ),
-#             400: openapi.Response(
-#                 description='HTTP_400_BAD_REQUEST',
-#             ),
-#             401: openapi.Response(
-#                 description='Authentication credentials were not provided.',
-#             )
-#         }
-#     )
-#     def create(self, request, course_id):
-#         if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
-#             request_data = request.data
-#             request_data['course'] = course_id
-#             serializer = serializers.ContactsSerializer(data=request_data)
-#             if serializer.is_valid():
-#                 serializer.save(course_id=course_id, user_id=request.user.id)
-#                 return Response(serializer.data, status=201)
-#             return Response(serializer.errors, status=400)
-#         return Response({'message': 'Недостаточно прав'}, status=403)
-
-#     def list(self, request, course_id):
-#         if not request.user.course.filter(id=course_id).exists():
-#             return Response({'message': 'Контакт не найден'}, status=404)
-#         contacts = models.Contacts.objects.filter(course_id=course_id)
-#         serializer = serializers.ContactsSerializer(contacts, many=True)
-#         return Response(serializer.data)
-
-#     def retrieve(self, request, course_id, pk=None):
-#         if not request.user.course.filter(id=course_id).exists():
-#             return Response({'message': 'Контакт не найден'}, status=404)
-#         try:
-#             contact = models.Contacts.objects.get(pk=pk, course_id=course_id)
-#         except Contacts.DoesNotExist:
-#             return Response({'message': 'Контакт не найден'}, status=404)
-
-#         serializer = serializers.ContactsSerializer(contact)
-#         return Response(serializer.data)
-
-#     @swagger_auto_schema(
-#         request_body=openapi.Schema(
-#             type=openapi.TYPE_OBJECT,
-#             properties={
-#                 'phone_number': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='phone_number',
-#                     example='+79811110011'
-#                 ),
-#                 'email': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='email',
-#                     example='email@mail.ru'
-#                 ),
-#                 'first_name': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='first_name',
-#                     example="Test"
-#                 ),
-#                 'last_name': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='last_name',
-#                     example="last_name"
-#                 ),
-#                 'additional': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='additional',
-#                     example="additional"
-#                 ),
-#                 'activity': openapi.Schema(
-#                     type=openapi.TYPE_STRING,
-#                     description='activity',
-#                     example="activity"
-#                 ),
-#             },
-#         ),
-#         responses={
-#             201: openapi.Response(
-#                 description='OK',
-#             ),
-#             400: openapi.Response(
-#                 description='HTTP_400_BAD_REQUEST',
-#             ),
-#             401: openapi.Response(
-#                 description='Authentication credentials were not provided.',
-#             )
-#         }
-#     )
-#     def update(self, request, course_id, pk=None):
-#         try:
-#             contact = models.Contacts.objects.get(pk=pk, course_id=course_id)
-#         except Contacts.DoesNotExist:
-#             return Response({'message': 'Контакт не найден'}, status=404)
-
-#         if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
-#             request_data = request.data
-#             request_data['course'] = course_id
-#             if 'email' not in request_data:
-#                 request_data['email'] = contact.email
-#             serializer = serializers.ContactsSerializer(contact, data=request_data)
-#             if serializer.is_valid():
-#                 serializer.save()
-#                 return Response(serializer.data)
-#             return Response(serializer.errors, status=400)
-#         return Response({'message': 'Недостаточно прав'}, status=403)
 
 class CourseViewSet(viewsets.ModelViewSet):
-    # queryset = models.Course.objects.all()
-    # permission_classes = [permissions.IsAuthenticated]
     serializer_class = serializers.CourseSerializer
 
     def get_permissions(self):
@@ -454,6 +330,11 @@ class CourseViewSet(viewsets.ModelViewSet):
                     type=openapi.TYPE_STRING,
                     description='last_name',
                     example="last_name"
+                ),
+                'country': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='country',
+                    example="country"
                 ),
                 'additional': openapi.Schema(
                     type=openapi.TYPE_STRING,
@@ -504,24 +385,6 @@ class CourseViewSet(viewsets.ModelViewSet):
         contacts = models.Contacts.objects.filter(course_id=course_id)
         serializer = serializers.ContactsSerializer(contacts, many=True)
         return Response(serializer.data)
-
-    # @action(
-    #     detail=True,
-    #     methods=['GET'],
-    #     url_path='contacts/(?P<contacts_id>[0-9]+)',
-    #     permission_classes=[IsAuthenticated]
-    # )
-    # def retrieve_contacts(self, request, contacts_id, pk=None):
-    #     course_id = pk
-    #     if not request.user.course.filter(id=course_id).exists():
-    #         return Response({'message': 'Контакт не найден'}, status=404)
-    #     try:
-    #         contact = models.Contacts.objects.get(pk=contacts_id, course_id=course_id)
-    #     except Contacts.DoesNotExist:
-    #         return Response({'message': 'Контакт не найден'}, status=404)
-
-    #     serializer = serializers.ContactsSerializer(contact)
-    #     return Response(serializer.data)
 
     @action(
         detail=True,
@@ -590,6 +453,248 @@ class CourseViewSet(viewsets.ModelViewSet):
             if 'email' not in request_data:
                 request_data['email'] = contact.email
             serializer = serializers.ContactsSerializer(contact, data=request_data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=400)
+        return Response({'message': 'Недостаточно прав'}, status=403)
+    
+
+    @action(
+        detail=True,
+        methods=['POST'],
+        url_path='module',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'name': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='name',
+                    example='name'
+                ),
+                'description': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='description',
+                    example='description'
+                ),
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                description='OK',
+            ),
+            400: openapi.Response(
+                description='HTTP_400_BAD_REQUEST',
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def create_modules(self, request, pk):
+        course_id = pk
+        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+            request_data = request.data
+            request_data['course'] = course_id
+            serializer = serializers.ModuleSerializer(data=request_data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=201)
+            return Response(serializer.errors, status=400)
+        return Response({'message': 'Недостаточно прав'}, status=403)
+
+    @action(
+        detail=True,
+        methods=['GET'],
+        url_path='modules',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_module(self, request, pk):
+        course_id = pk
+        if not request.user.course.filter(id=course_id).exists():
+            return Response({'message': 'Модуль не найден'}, status=404)
+        contacts = models.Module.objects.filter(course_id=course_id)
+        serializer = serializers.ModuleSerializer(contacts, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['PUT'],
+        url_path='module/(?P<module_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'name': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='name',
+                    example='name'
+                ),
+                'description': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='description',
+                    example='description'
+                ),
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                description='OK',
+            ),
+            400: openapi.Response(
+                description='HTTP_400_BAD_REQUEST',
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def update_module(self, request, module_id, pk=None):
+        course_id = pk
+        try:
+            module = models.Module.objects.get(pk=module_id, course_id=course_id)
+        except models.Contacts.DoesNotExist:
+            return Response({'message': 'Контакт не найден'}, status=404)
+        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+            request_data = request.data
+            request_data['course'] = course_id
+            serializer = serializers.ModuleSerializer(module, data=request_data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=400)
+        return Response({'message': 'Недостаточно прав'}, status=403)
+
+
+    @action(
+        detail=True,
+        methods=['POST'],
+        url_path='task',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'module': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='module',
+                    example=1
+                ),
+                'name': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='name',
+                    example='name'
+                ),
+                'text': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='text',
+                    example='text'
+                ),
+                'type_task': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='type_task',
+                    example='type_task'
+                ),
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                description='OK',
+            ),
+            400: openapi.Response(
+                description='HTTP_400_BAD_REQUEST',
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def create_tasks(self, request, pk):
+        course_id = pk
+        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+            module = models.Module.objects.filter(course_id=course_id)
+            if not module.exists():
+                return Response({'message': 'Недостаточно прав'}, status=403) 
+            request_data = request.data
+            request_data['course'] = course_id
+            serializer = serializers.TaskSerializer(data=request_data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=201)
+            return Response(serializer.errors, status=400)
+        return Response({'message': 'Недостаточно прав'}, status=403)
+
+    @action(
+        detail=True,
+        methods=['GET'],
+        url_path='tasks/(?P<module_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_tasks(self, request, module_id, pk):
+        course_id = pk
+        if not request.user.course.filter(id=course_id, module_course=module_id).exists():
+            return Response({'message': 'Модуль не найден'}, status=404)
+        tasks = models.Task.objects.filter(module_id=module_id)
+        serializer = serializers.TaskSerializer(tasks, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=True,
+        methods=['PUT'],
+        url_path='task/(?P<task_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'name': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='name',
+                    example='name'
+                ),
+                'text': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='text',
+                    example='text'
+                ),
+                'type_task': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='type_task',
+                    example='type_task'
+                ),
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                description='OK',
+            ),
+            400: openapi.Response(
+                description='HTTP_400_BAD_REQUEST',
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def update_task(self, request, task_id, pk=None):
+        course_id = pk
+        try:
+            task = models.Task.objects.get(pk=task_id, course_id=course_id)
+        except models.Contacts.DoesNotExist:
+            return Response({'message': 'Задача не найден'}, status=404)
+
+        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+            request_data = request.data
+            request_data['course'] = course_id
+            request_data['module'] = task.module_id
+            serializer = serializers.TaskSerializer(task, data=request_data)
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data)

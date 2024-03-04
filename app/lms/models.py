@@ -137,7 +137,7 @@ class User(AbstractUser):
     )
     course = models.ManyToManyField(
         Course,
-        related_name='сourse',
+        related_name='user_course',
         blank=True,
         verbose_name='Курс'
     )
@@ -293,6 +293,11 @@ class Contacts(CommonFields):
         null=True,
     )
     last_name = models.CharField(
+        max_length=25,
+        blank=True,
+        null=True,
+    )
+    country = models.CharField(
         max_length=25,
         blank=True,
         null=True,
