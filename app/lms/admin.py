@@ -81,13 +81,13 @@ class CommunicationAdmin(admin.ModelAdmin):
     ordering = ('-id',)
 
 
-@admin.register(models.Module)
-class ModuleAdmin(admin.ModelAdmin):
+@admin.register(models.Lecture)
+class LectureAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'course',
         'name',
-        'description',
+        'content',
     )
     search_fields = ('sender__email', 'recipient__email')
     empty_value_display = '-пусто-'
@@ -99,25 +99,11 @@ class TaskAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'course',
-        'module',
+        'lecture',
         'name',
         'text',
     )
-    search_fields = ('course__name', 'module__name')
-    empty_value_display = '-пусто-'
-    ordering = ('-id',)
-
-
-@admin.register(models.Lecture)
-class LectureAdmin(admin.ModelAdmin):
-    list_display = (
-        'id',
-        'name',
-        'module',
-        'text',
-        'additional',
-    )
-    search_fields = ('module__name',)
+    search_fields = ('course__name', 'lecture__name')
     empty_value_display = '-пусто-'
     ordering = ('-id',)
 
@@ -138,15 +124,15 @@ class TaskSolutionAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(models.ModuleCompletion)
-class ModuleCompletionAdmin(admin.ModelAdmin):
+@admin.register(models.LectureCompletion)
+class LectureCompletionAdmin(admin.ModelAdmin):
     list_display = (
         'id',
-        'module',
+        'lecture',
         'student',
         'is_completed',
     )
-    search_fields = ('student__email', 'module__name')
+    search_fields = ('student__email', 'lecture__name')
     empty_value_display = '-пусто-'
     ordering = ('-id',)
 

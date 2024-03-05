@@ -1,6 +1,7 @@
 import datetime
 import typing
 import uuid
+import json
 
 import requests
 from dateutil.relativedelta import relativedelta
@@ -463,7 +464,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=['POST'],
-        url_path='module',
+        url_path='lecture',
         permission_classes=[IsAuthenticated]
     )
     @swagger_auto_schema(
@@ -475,10 +476,10 @@ class CourseViewSet(viewsets.ModelViewSet):
                     description='name',
                     example='name'
                 ),
-                'description': openapi.Schema(
+                'content': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description='description',
-                    example='description'
+                    description='контент',
+                    example="{'key1': 'value1', 'key2': 'value2'}"
                 ),
             },
         ),
@@ -494,12 +495,14 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         }
     )
-    def create_modules(self, request, pk):
+    def create_lecture(self, request, pk):
         course_id = pk
         if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
             request_data = request.data
             request_data['course'] = course_id
-            serializer = serializers.ModuleSerializer(data=request_data)
+            content = request_data['content'].replace("'", '"')
+            request_data['content'] = json.loads(content)
+            serializer = serializers.LectureSerializer(data=request_data)
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data, status=201)
@@ -509,21 +512,21 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=['GET'],
-        url_path='modules',
+        url_path='lectures',
         permission_classes=[IsAuthenticated]
     )
-    def get_module(self, request, pk):
+    def get_lectures(self, request, pk):
         course_id = pk
         if not request.user.course.filter(id=course_id).exists():
-            return Response({'message': 'Модуль не найден'}, status=404)
-        contacts = models.Module.objects.filter(course_id=course_id)
-        serializer = serializers.ModuleSerializer(contacts, many=True)
+            return Response({'message': 'Лекция не найдена'}, status=404)
+        lectures = models.Lecture.objects.filter(course_id=course_id)
+        serializer = serializers.LectureSerializer(lectures, many=True)
         return Response(serializer.data)
 
     @action(
         detail=True,
         methods=['PUT'],
-        url_path='module/(?P<module_id>[0-9]+)',
+        url_path='lecture/(?P<lecture_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
     @swagger_auto_schema(
@@ -535,10 +538,10 @@ class CourseViewSet(viewsets.ModelViewSet):
                     description='name',
                     example='name'
                 ),
-                'description': openapi.Schema(
+                'content': openapi.Schema(
                     type=openapi.TYPE_STRING,
-                    description='description',
-                    example='description'
+                    description='контент',
+                    example="{'key1': 'value1', 'key2': 'value2'}"
                 ),
             },
         ),
@@ -554,16 +557,20 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         }
     )
-    def update_module(self, request, module_id, pk=None):
+    def update_lecture(self, request, lecture_id, pk=None):
         course_id = pk
         try:
-            module = models.Module.objects.get(pk=module_id, course_id=course_id)
-        except models.Contacts.DoesNotExist:
-            return Response({'message': 'Контакт не найден'}, status=404)
+            lecture = models.Lecture.objects.get(pk=lecture_id, course_id=course_id)
+        except models.Lecture.DoesNotExist:
+            return Response({'message': 'Лекция не найдена'}, status=404)
         if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
             request_data = request.data
             request_data['course'] = course_id
-            serializer = serializers.ModuleSerializer(module, data=request_data)
+            if 'content' in request_data:
+                content = request_data['content'].replace("'", '"')
+                request_data['content'] = json.loads(content)
+            log_info(f'{request_data = }')
+            serializer = serializers.LectureSerializer(lecture, data=request_data)
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data)
@@ -581,9 +588,9 @@ class CourseViewSet(viewsets.ModelViewSet):
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
             properties={
-                'module': openapi.Schema(
+                'lecture': openapi.Schema(
                     type=openapi.TYPE_INTEGER,
-                    description='module',
+                    description='lecture',
                     example=1
                 ),
                 'name': openapi.Schema(
@@ -594,7 +601,7 @@ class CourseViewSet(viewsets.ModelViewSet):
                 'text': openapi.Schema(
                     type=openapi.TYPE_STRING,
                     description='text',
-                    example='text'
+                    example="{'key1': 'value1', 'key2': 'value2'}"
                 ),
                 'type_task': openapi.Schema(
                     type=openapi.TYPE_STRING,
@@ -618,11 +625,13 @@ class CourseViewSet(viewsets.ModelViewSet):
     def create_tasks(self, request, pk):
         course_id = pk
         if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
-            module = models.Module.objects.filter(course_id=course_id)
-            if not module.exists():
+            lecture = models.Lecture.objects.filter(course_id=course_id)
+            if not lecture.exists():
                 return Response({'message': 'Недостаточно прав'}, status=403) 
             request_data = request.data
             request_data['course'] = course_id
+            text = request_data['text'].replace("'", '"')
+            request_data['text'] = json.loads(text)
             serializer = serializers.TaskSerializer(data=request_data)
             if serializer.is_valid():
                 serializer.save()
@@ -633,14 +642,14 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=['GET'],
-        url_path='tasks/(?P<module_id>[0-9]+)',
+        url_path='tasks/(?P<lecture_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
-    def get_tasks(self, request, module_id, pk):
+    def get_tasks(self, request, lecture_id, pk):
         course_id = pk
-        if not request.user.course.filter(id=course_id, module_course=module_id).exists():
-            return Response({'message': 'Модуль не найден'}, status=404)
-        tasks = models.Task.objects.filter(module_id=module_id)
+        if not request.user.course.filter(id=course_id, lecture_course=lecture_id).exists():
+            return Response({'message': 'Лекция не найден'}, status=404)
+        tasks = models.Task.objects.filter(lecture_id=lecture_id)
         serializer = serializers.TaskSerializer(tasks, many=True)
         return Response(serializer.data)
 
@@ -662,7 +671,7 @@ class CourseViewSet(viewsets.ModelViewSet):
                 'text': openapi.Schema(
                     type=openapi.TYPE_STRING,
                     description='text',
-                    example='text'
+                    example="{'key1': 'value1', 'key2': 'value2'}"
                 ),
                 'type_task': openapi.Schema(
                     type=openapi.TYPE_STRING,
@@ -687,13 +696,17 @@ class CourseViewSet(viewsets.ModelViewSet):
         course_id = pk
         try:
             task = models.Task.objects.get(pk=task_id, course_id=course_id)
-        except models.Contacts.DoesNotExist:
+        except models.Task.DoesNotExist:
             return Response({'message': 'Задача не найден'}, status=404)
 
         if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
             request_data = request.data
             request_data['course'] = course_id
-            request_data['module'] = task.module_id
+            request_data['lecture'] = task.lecture_id
+            if 'text' in request_data:
+                text = request_data['text'].replace("'", '"')
+                request_data['text'] = json.loads(text)
+            log_info(f'{request_data = }')
             serializer = serializers.TaskSerializer(task, data=request_data)
             if serializer.is_valid():
                 serializer.save()

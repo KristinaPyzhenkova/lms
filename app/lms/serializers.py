@@ -174,16 +174,16 @@ class CourseSerializer(serializers.ModelSerializer):
         return course_new
 
 
-class ModuleSerializer(serializers.ModelSerializer):
+class LectureSerializer(serializers.ModelSerializer):
     class Meta:
-        model = models.Module
-        fields = ['id', 'name', 'description', 'course']
+        model = models.Lecture
+        fields = ['id', 'name', 'content', 'course']
 
 
 class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Task
-        fields = ['id', 'course', 'module', 'name', 'text', 'type_task']
+        fields = ['id', 'course', 'lecture', 'name', 'text', 'type_task']
 
 
 class ManagerStudentSerializer(serializers.ModelSerializer):
@@ -215,7 +215,7 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
         return f"{completed_tasks.count()}/{total_tasks.count()}"
 
     def get_lectures_progress(self, obj):
-        total_modules = models.ModuleCompletion.objects.filter(student=obj)
-        # completed_modules = models.ModuleCompletion.objects.filter(student=obj, is_completed=True).count()
-        completed_modules = 0
-        return f"{completed_modules}/{total_modules.count()}"
+        total_lectures = models.ModuleCompletion.objects.filter(student=obj)
+        # completed_lectures = models.ModuleCompletion.objects.filter(student=obj, is_completed=True).count()
+        completed_lectures = 0
+        return f"{completed_lectures}/{total_lectures.count()}"

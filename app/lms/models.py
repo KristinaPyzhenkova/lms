@@ -173,19 +173,25 @@ class Communication(CommonFields):
         return f"From: {self.sender.email}, To: {self.recipient.email}"
 
 
-class Module(CommonFields):
-    course = models.ForeignKey(Course, related_name='module_course', on_delete=models.CASCADE)
+class Lecture(CommonFields):
+    course = models.ForeignKey(
+        Course,
+        related_name='lecture_course',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
     name = models.CharField(
         max_length=100,
         blank=True,
         null=True,
     )
-    description = models.TextField(blank=True, null=True)
+    content = models.JSONField(blank=True, null=True)
 
     class Meta:
         ordering = ['-id']
-        verbose_name = 'Модуль'
-        verbose_name_plural = 'Модули'
+        verbose_name = 'Лекция'
+        verbose_name_plural = 'Лекции'
 
     def __str__(self):
         return self.name
@@ -193,7 +199,13 @@ class Module(CommonFields):
 
 class Task(CommonFields):
     course = models.ForeignKey(Course, related_name='task_course', on_delete=models.CASCADE)
-    module = models.ForeignKey(Module, related_name='task_module', on_delete=models.CASCADE)
+    lecture = models.ForeignKey(
+        Lecture,
+        related_name='task_lecture',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
     name = models.CharField(
         max_length=100,
         blank=True,
@@ -215,25 +227,6 @@ class Task(CommonFields):
         return self.name
 
 
-class Lecture(CommonFields):
-    module = models.ForeignKey(Module, related_name='lecture_module', on_delete=models.CASCADE)
-    name = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True,
-    )
-    text = models.TextField()
-    additional = models.JSONField(blank=True, null=True)
-
-    class Meta:
-        ordering = ['-id']
-        verbose_name = 'Лекция'
-        verbose_name_plural = 'Лекции'
-
-    def __str__(self):
-        return self.name
-
-
 class TaskSolution(CommonFields):
     task = models.ForeignKey(Task, related_name='task_solution', on_delete=models.CASCADE)
     student = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -248,21 +241,21 @@ class TaskSolution(CommonFields):
         return self.id
 
 
-class ModuleCompletion(CommonFields):
-    module = models.ForeignKey(Module, on_delete=models.CASCADE)
+class LectureCompletion(CommonFields):
+    lecture = models.ForeignKey(Lecture, on_delete=models.CASCADE)
     student = models.ForeignKey(User, on_delete=models.CASCADE)
 
     class Meta:
         ordering = ['-id']
-        verbose_name = 'Статус модуля'
-        verbose_name_plural = 'Статус модулей'
+        verbose_name = 'Статус лекции'
+        verbose_name_plural = 'Статус лекции'
 
     def __str__(self):
         return self.id
 
     @property
     def is_completed(self):
-        tasks = Task.object.filter(module=self.module)
+        tasks = Task.object.filter(lecture=self.lecture)
         task_solution_total = TaskSolution.object.filter(task__in=tasks)
         return True if (
             task_solution_total.filter(student=self.student).count() / task_solution_total.count() * 100
