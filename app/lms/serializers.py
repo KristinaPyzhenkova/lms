@@ -1,6 +1,6 @@
 import re
 
-from django.db.models import Q
+from django.db.models import Count, F, ExpressionWrapper, FloatField, Q
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
@@ -187,10 +187,7 @@ class TaskSerializer(serializers.ModelSerializer):
 
 
 class ManagerStudentSerializer(serializers.ModelSerializer):
-    # email = serializers.EmailField(source='user.email')
-    # first_name = serializers.CharField(source='user.first_name')
-    # last_name = serializers.CharField(source='user.last_name')
-    # phone_number = serializers.CharField(source='user.phone_number')
+    course_id = serializers.SerializerMethodField()  # Добавляем поле course_id
     course_name = serializers.SerializerMethodField()
     messages_count = serializers.SerializerMethodField()
     tasks_progress = serializers.SerializerMethodField()
@@ -198,24 +195,34 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.User
-        fields = ['first_name', 'last_name', 'email', 'phone_number', 'state', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress']
+        fields = ['first_name', 'last_name', 'email', 'phone_number', 'state', 'course_id', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress']
 
+    def to_representation(self, instance):
+        user, course = instance
+        mentor = self.context['request'].user
+        representation = super().to_representation(user)
+        representation['course_id'] = course.id
+        representation['course_name'] = course.name
+        representation['messages_count'] = models.Communication.objects.filter(Q(sender=mentor, recipient=user) | Q(sender=user, recipient=mentor)).count()
+        total_tasks = models.TaskSolution.objects.filter(student=user, task__course=course)
+        completed_tasks = total_tasks.filter(is_completed=True)
+        representation['tasks_progress'] = f"{completed_tasks.count()}/{total_tasks.count()}"
+        total_lectures = models.LectureCompletion.objects.filter(student=user, lecture__course=course)
+        completed_lectures = [lecture for lecture in total_lectures if lecture.calculate_completion]
+        representation['lectures_progress'] = f"{len(completed_lectures)}/{total_lectures.count()}"
+        return representation
+    
+    def get_course_id(self, obj):
+        return None
+    
     def get_course_name(self, obj):
-        user = self.context['request'].user
-        return ", ".join([course.name for course in obj.course.all() if user in course.user_course.all()])
+        return None
 
     def get_messages_count(self, obj):
-        sender = self.context['request'].user
-        return models.Communication.objects.filter(Q(sender=sender, recipient=obj) | Q(sender=obj, recipient=sender)).count()
+        return None
 
     def get_tasks_progress(self, obj):
-        user = self.context['request'].user
-        total_tasks = models.TaskSolution.objects.filter(student=obj, task__course__user_course=user)
-        completed_tasks = total_tasks.filter(is_completed=True)
-        return f"{completed_tasks.count()}/{total_tasks.count()}"
+        return None
 
     def get_lectures_progress(self, obj):
-        total_lectures = models.ModuleCompletion.objects.filter(student=obj)
-        # completed_lectures = models.ModuleCompletion.objects.filter(student=obj, is_completed=True).count()
-        completed_lectures = 0
-        return f"{completed_lectures}/{total_lectures.count()}"
+        return None

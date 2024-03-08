@@ -251,15 +251,14 @@ class LectureCompletion(CommonFields):
         verbose_name_plural = 'Статус лекции'
 
     def __str__(self):
-        return self.id
+        return str(self.id)
 
     @property
-    def is_completed(self):
-        tasks = Task.object.filter(lecture=self.lecture)
-        task_solution_total = TaskSolution.object.filter(task__in=tasks)
-        return True if (
-            task_solution_total.filter(student=self.student).count() / task_solution_total.count() * 100
-        ) > const.is_opened_percent else False
+    def calculate_completion(self):
+        tasks = Task.objects.filter(lecture=self.lecture)
+        task_solution_total = TaskSolution.objects.filter(task__in=tasks)
+        completion_percentage = (task_solution_total.filter(student=self.student).count() / task_solution_total.count()) * 100
+        return completion_percentage > const.is_opened_percent
 
 
 class Contacts(CommonFields):

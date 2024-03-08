@@ -130,7 +130,7 @@ class LectureCompletionAdmin(admin.ModelAdmin):
         'id',
         'lecture',
         'student',
-        'is_completed',
+        'calculate_completion',
     )
     search_fields = ('student__email', 'lecture__name')
     empty_value_display = '-пусто-'

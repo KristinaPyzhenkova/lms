@@ -719,7 +719,12 @@ class ManagerStudentsView(APIView):
     permission_classes = [IsMentor]
 
     def get(self, request):
-        students = models.User.objects.filter(course__in=request.user.course.all(), role=models.User.STUDENT)
-        print(f'{students = }')
-        serializer = serializers.ManagerStudentSerializer(students, many=True, context={"request": request})
+        user = request.user
+        courses = user.course.all()
+        students_with_courses = []
+        for course in courses:
+            students_on_course = course.user_course.filter(role=models.User.STUDENT)
+            for student in students_on_course:
+                students_with_courses.append((student, course))
+        serializer = serializers.ManagerStudentSerializer(students_with_courses, context={"request": request}, many=True)
         return Response(serializer.data)
