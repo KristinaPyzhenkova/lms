@@ -28,34 +28,34 @@ from lms import models
 # post_save.connect(create_task_solutions, sender=models.User)
 
 
-@receiver(post_save, sender=models.Lecture)
-def create_lecture_completions(sender, instance, created, **kwargs):
-    students = models.User.objects.filter(role=models.User.STUDENT, course=instance.course)
-    if created:
-        for student in students:
-            models.LectureCompletion.objects.create(lecture=instance, student=student)
+# @receiver(post_save, sender=models.Lecture)
+# def create_lecture_completions(sender, instance, created, **kwargs):
+#     students = models.User.objects.filter(role=models.User.STUDENT, course=instance.course)
+#     if created:
+#         for student in students:
+#             models.LectureCompletion.objects.create(lecture=instance, student=student)
 
-    tasks_to_add = models.Task.objects.filter(lecture=instance)
-    for student in students:
-        current_tasks = models.TaskSolution.objects.filter(student=student, task__lecture=instance)
-        current_task_ids = current_tasks.values_list('task', flat=True)
-        for task in tasks_to_add:
-            if task.pk not in current_task_ids:
-                models.TaskSolution.objects.create(task=task, student=student)
-
-
-post_save.connect(create_lecture_completions, sender=models.Lecture)
+    # tasks_to_add = models.Task.objects.filter(lecture=instance)
+    # for student in students:
+    #     current_tasks = models.TaskSolution.objects.filter(student=student, task__lecture=instance)
+    #     current_task_ids = current_tasks.values_list('task', flat=True)
+    #     for task in tasks_to_add:
+    #         if task.pk not in current_task_ids:
+    #             models.TaskSolution.objects.create(task=task, student=student)
 
 
-@receiver(post_save, sender=models.Task)
-def create_task_completions(sender, instance, created, **kwargs):
-    if created:
-        students = models.User.objects.filter(role=models.User.STUDENT, course=instance.course)
-        for student in students:
-            models.TaskSolution.objects.create(task=instance, student=student)
+# post_save.connect(create_lecture_completions, sender=models.Lecture)
 
 
-post_save.connect(create_task_completions, sender=models.Task)
+# @receiver(post_save, sender=models.Task)
+# def create_task_completions(sender, instance, created, **kwargs):
+#     if created:
+#         students = models.User.objects.filter(role=models.User.STUDENT, course=instance.course)
+#         for student in students:
+#             models.TaskSolution.objects.create(task=instance, student=student)
+
+
+# post_save.connect(create_task_completions, sender=models.Task)
 
 
 @receiver(reset_password_token_created)

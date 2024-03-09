@@ -113,15 +113,11 @@ class TaskSolutionAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'task',
-        'student',
-        'is_completed',
+        'student'
     )
     search_fields = ('student__email', 'task__name')
     empty_value_display = '-пусто-'
     ordering = ('-id',)
-    list_filter = (
-        'is_completed',
-    )
 
 
 @admin.register(models.LectureCompletion)
@@ -142,6 +138,7 @@ class ContactsAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'user',
+        'course',
         'country',
         'phone_number',
         'email',

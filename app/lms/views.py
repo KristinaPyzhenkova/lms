@@ -388,9 +388,9 @@ class CourseViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(
-        detail=True,
+        detail=False,
         methods=['PUT'],
-        url_path='contact/(?P<contacts_id>[0-9]+)',
+        url_path='update_contact/(?P<contacts_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
     @swagger_auto_schema(
@@ -441,16 +441,15 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         }
     )
-    def update_contacts(self, request, contacts_id, pk=None):
-        course_id = pk
+    def update_contact(self, request, contacts_id, pk=None):
         try:
-            contact = models.Contacts.objects.get(pk=contacts_id, course_id=course_id)
+            contact = models.Contacts.objects.get(pk=contacts_id, course__user_course=request.user)
         except models.Contacts.DoesNotExist:
             return Response({'message': 'Контакт не найден'}, status=404)
 
-        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+        if request.user.role == models.User.MENTOR:
             request_data = request.data
-            request_data['course'] = course_id
+            request_data['course'] = contact.course.pk
             if 'email' not in request_data:
                 request_data['email'] = contact.email
             serializer = serializers.ContactsSerializer(contact, data=request_data)
@@ -459,6 +458,23 @@ class CourseViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data)
             return Response(serializer.errors, status=400)
         return Response({'message': 'Недостаточно прав'}, status=403)
+    
+    @action(
+        detail=False,
+        methods=['DELETE'],
+        url_path='contact/(?P<contacts_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    def delete_contact(self, request, contacts_id):
+        try:
+            contact = models.Contacts.objects.get(pk=contacts_id, user=request.user)
+        except models.Contacts.DoesNotExist:
+            return Response({'message': 'Контакт не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user.role == models.User.MENTOR:
+            contact.delete()
+            return Response({'message': 'Контакт успешно удален'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'message': 'Недостаточно прав'}, status=status.HTTP_403_FORBIDDEN)
     
 
     @action(
@@ -524,9 +540,29 @@ class CourseViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(
-        detail=True,
+        detail=False,
+        methods=['GET'],
+        url_path='lectures/(?P<lecture_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_lecture_id(self, request, lecture_id):
+        try:
+            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course=request.user)
+        except models.Lecture.DoesNotExist:
+            return Response({'message': 'Лекция не найдена'}, status=404)
+        if request.user.role == models.User.MENTOR:
+            serializer = serializers.LectureSerializer(lecture)
+            return Response(serializer.data)
+        else:
+            try:
+                models.LectureCompletion.objects.get(lecture=lecture, student=request.user)
+            except models.LectureCompletion.DoesNotExist:
+                return Response({'message': 'Лекция еще не открыта'}, status=404)
+
+    @action(
+        detail=False,
         methods=['PUT'],
-        url_path='lecture/(?P<lecture_id>[0-9]+)',
+        url_path='update_lecture/(?P<lecture_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
     @swagger_auto_schema(
@@ -557,15 +593,14 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         }
     )
-    def update_lecture(self, request, lecture_id, pk=None):
-        course_id = pk
+    def update_lecture(self, request, lecture_id):
         try:
-            lecture = models.Lecture.objects.get(pk=lecture_id, course_id=course_id)
+            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course=request.user)
         except models.Lecture.DoesNotExist:
             return Response({'message': 'Лекция не найдена'}, status=404)
-        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+        if request.user.role == models.User.MENTOR:
             request_data = request.data
-            request_data['course'] = course_id
+            request_data['course'] = lecture.course.pk
             if 'content' in request_data:
                 content = request_data['content'].replace("'", '"')
                 request_data['content'] = json.loads(content)
@@ -576,6 +611,23 @@ class CourseViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data)
             return Response(serializer.errors, status=400)
         return Response({'message': 'Недостаточно прав'}, status=403)
+    
+    @action(
+        detail=False,
+        methods=['DELETE'],
+        url_path='lecture/(?P<lecture_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    def delete_lecture(self, request, lecture_id):
+        try:
+            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course=request.user)
+        except models.Lecture.DoesNotExist:
+            return Response({'message': 'Лекция не найдена'}, status=404)
+
+        if request.user.role == models.User.MENTOR:
+            lecture.delete()
+            return Response({'message': 'Лекция успешно удалена'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'message': 'Недостаточно прав'}, status=status.HTTP_403_FORBIDDEN)
 
 
     @action(
@@ -640,23 +692,106 @@ class CourseViewSet(viewsets.ModelViewSet):
         return Response({'message': 'Недостаточно прав'}, status=403)
 
     @action(
-        detail=True,
+        detail=False,
         methods=['GET'],
         url_path='tasks/(?P<lecture_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
-    def get_tasks(self, request, lecture_id, pk):
-        course_id = pk
-        if not request.user.course.filter(id=course_id, lecture_course=lecture_id).exists():
+    def get_tasks_lecture_id(self, request, lecture_id):
+        if not request.user.course.filter(lecture_course=lecture_id).exists():
             return Response({'message': 'Лекция не найден'}, status=404)
         tasks = models.Task.objects.filter(lecture_id=lecture_id)
         serializer = serializers.TaskSerializer(tasks, many=True)
         return Response(serializer.data)
-
+    
     @action(
         detail=True,
+        methods=['GET'],
+        url_path='tasks',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_tasks(self, request, pk):
+        if not request.user.course.filter(id=pk).exists():
+            return Response({'message': 'Курс не найден'}, status=404)
+        tasks = models.Task.objects.filter(course_id=pk)
+        serializer = serializers.ListTaskSerializer([tasks], many=True, context={'request': request, 'pk': pk})
+        return Response(serializer.data)
+    
+    @action(
+        detail=True,
+        methods=['GET'],
+        url_path='solutions',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_task_solution(self, request, pk):
+        if not request.user.course.filter(id=pk).exists():
+            return Response({'message': 'Курс не найден'}, status=404)
+        tasks = models.TaskSolution.objects.filter(task__course=pk)
+        serializer = serializers.TaskSolutionSerializer(tasks, many=True)
+        return Response(serializer.data)
+    
+    @action(
+        detail=False,
+        methods=['POST'],
+        url_path='solution',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'task': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='task',
+                    example=1
+                ),
+                'answer': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='answer',
+                    example=1
+                )
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                description='OK',
+            ),
+            400: openapi.Response(
+                description='HTTP_400_BAD_REQUEST',
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def create_task_solution(self, request):
+        request_data = request.data
+        answer = request_data.pop('answer')
+        print(f'{answer = }')
+        if request.user.role == models.User.STUDENT:
+        # if True:
+            try:
+                task = models.Task.objects.get(id=request_data['task'], course__user_course=request.user)
+                print(f'{task = }')
+            except models.Task.DoesNotExist:
+                returnResponse({'message': 'Задача не найдена'}, status=404)
+            print(f'{task.text["answer"] = }')
+            if task.text['answer'] != answer:
+                return Response({'message': 'Задача решена не верно'}, status=404)
+            
+            request_data['student'] = request.user.pk
+            serializer = serializers.TaskSolutionSerializer(data=request_data)
+
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=201)
+            return Response(serializer.errors, status=400)
+        return Response({'message': 'Недостаточно прав'}, status=403)
+
+    @action(
+        detail=False,
         methods=['PUT'],
-        url_path='task/(?P<task_id>[0-9]+)',
+        url_path='update_task/(?P<task_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
     @swagger_auto_schema(
@@ -692,16 +827,15 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         }
     )
-    def update_task(self, request, task_id, pk=None):
-        course_id = pk
+    def update_task(self, request, task_id):
         try:
-            task = models.Task.objects.get(pk=task_id, course_id=course_id)
+            task = models.Task.objects.get(pk=task_id, course__user_course=request.user)
         except models.Task.DoesNotExist:
             return Response({'message': 'Задача не найден'}, status=404)
 
-        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+        if request.user.role == models.User.MENTOR:
             request_data = request.data
-            request_data['course'] = course_id
+            request_data['course'] = task.course.pk
             request_data['lecture'] = task.lecture_id
             if 'text' in request_data:
                 text = request_data['text'].replace("'", '"')
@@ -713,6 +847,23 @@ class CourseViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data)
             return Response(serializer.errors, status=400)
         return Response({'message': 'Недостаточно прав'}, status=403)
+    
+    @action(
+        detail=False,
+        methods=['DELETE'],
+        url_path='task/(?P<task_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    def delete_task(self, request, task_id):
+        try:
+            task = models.Task.objects.get(pk=task_id, course__user_course=request.user)
+        except models.Task.DoesNotExist:
+            return Response({'message': 'Задача не найдена'}, status=404)
+
+        if request.user.role == models.User.MENTOR:
+            task.delete()
+            return Response({'message': 'Задача успешно удалена'}, status=status.HTTP_204_NO_CONTENT)
+        return Response({'message': 'Недостаточно прав'}, status=status.HTTP_403_FORBIDDEN)
 
 
 class ManagerStudentsView(APIView):

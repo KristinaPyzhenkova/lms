@@ -115,7 +115,6 @@ class CommunicationSerializer(serializers.ModelSerializer):
         fields = ['id', 'sender', 'recipient', 'message', 'is_read', 'reading_time']
 
     def create(self, validated_data):
-        print(validated_data)
         sender = validated_data.pop('sent_messages')
         recipient = validated_data.pop('received_messages')
         message = validated_data.pop('message')
@@ -186,16 +185,69 @@ class TaskSerializer(serializers.ModelSerializer):
         fields = ['id', 'course', 'lecture', 'name', 'text', 'type_task']
 
 
+class ListTaskSerializer(serializers.ModelSerializer):
+    tasks = TaskSerializer(source='*', many=True, read_only=True)
+    new_tasks = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.Task
+        fields = ['new_tasks', 'tasks']
+
+    def get_new_tasks(self, instance):
+        pk = self.context['pk']
+        course = models.Course.objects.get(pk=pk)
+        user = self.context['request'].user
+        lectures = models.Lecture.objects.filter(course=course)
+        open_lectures = models.LectureCompletion.objects.filter(lecture__in=lectures, student=user).values_list('lecture', flat=True)
+        tasks = models.Task.objects.filter(lecture__in=open_lectures)
+        user_solutions = models.TaskSolution.objects.filter(student=user, task__course=course)
+        tasks_to_exclude = user_solutions.values_list('task', flat=True)
+        tasks_ = tasks.exclude(pk__in=tasks_to_exclude)
+        return tasks_.count()
+
+
+class TaskSolutionSerializer(serializers.ModelSerializer):
+    task = serializers.PrimaryKeyRelatedField(
+        queryset=models.Task.objects.all(),
+        # source='task_solution',
+        # write_only=True
+    )
+    student = serializers.PrimaryKeyRelatedField(
+        queryset=models.User.objects.all(),
+        # write_only=True
+    )
+
+    class Meta:
+        model = models.TaskSolution
+        fields = ['id', 'task', 'student']
+
+    def create(self, validated_data):
+        task = validated_data.pop('task')
+        student = validated_data.pop('student')
+        try:
+            task_solution = models.TaskSolution.objects.get(task=task, student=student)
+        except models.TaskSolution.DoesNotExist:
+            task_solution = models.TaskSolution.objects.create(
+                task=task,
+                student=student,
+                **validated_data
+            )
+        return task_solution
+
 class ManagerStudentSerializer(serializers.ModelSerializer):
     course_id = serializers.SerializerMethodField()  # Добавляем поле course_id
     course_name = serializers.SerializerMethodField()
     messages_count = serializers.SerializerMethodField()
     tasks_progress = serializers.SerializerMethodField()
     lectures_progress = serializers.SerializerMethodField()
+    created = serializers.SerializerMethodField()
+    # reg_date = serializers.SerializerMethodField()
+    uploads = serializers.SerializerMethodField()
+    contacts = serializers.SerializerMethodField()
 
     class Meta:
         model = models.User
-        fields = ['first_name', 'last_name', 'email', 'phone_number', 'state', 'course_id', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress']
+        fields = ['first_name', 'last_name', 'email', 'phone_number', 'state', 'course_id', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress', 'created', 'uploads', 'contacts']
 
     def to_representation(self, instance):
         user, course = instance
@@ -204,13 +256,18 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
         representation['course_id'] = course.id
         representation['course_name'] = course.name
         representation['messages_count'] = models.Communication.objects.filter(Q(sender=mentor, recipient=user) | Q(sender=user, recipient=mentor)).count()
-        total_tasks = models.TaskSolution.objects.filter(student=user, task__course=course)
-        completed_tasks = total_tasks.filter(is_completed=True)
+        total_tasks = models.Task.objects.filter(course=course)
+        completed_tasks = models.TaskSolution.objects.filter(student=user, task__course=course)
         representation['tasks_progress'] = f"{completed_tasks.count()}/{total_tasks.count()}"
         total_lectures = models.LectureCompletion.objects.filter(student=user, lecture__course=course)
         completed_lectures = [lecture for lecture in total_lectures if lecture.calculate_completion]
         representation['lectures_progress'] = f"{len(completed_lectures)}/{total_lectures.count()}"
+        representation['uploads'] = '0/0'
+        representation['contacts'] = f'{course.contact_course.all().count()}/10'
         return representation
+    
+    def get_created(self, instance):
+        return instance.created.date().isoformat()
     
     def get_course_id(self, obj):
         return None
@@ -225,4 +282,13 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
         return None
 
     def get_lectures_progress(self, obj):
+        return None
+    
+    # def get_reg_date(self, obj):
+    #     return None
+    
+    def get_uploads(self, obj):
+        return None
+    
+    def get_contacts(self, obj):
         return None

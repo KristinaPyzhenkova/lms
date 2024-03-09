@@ -70,7 +70,7 @@ class Course(CommonFields):
         return self.name
 
 
-class User(AbstractUser):
+class User(AbstractUser, CommonFields):
     STUDENT = 'Студент'
     MENTOR = 'Наставник'
     ROLE = (
@@ -230,7 +230,7 @@ class Task(CommonFields):
 class TaskSolution(CommonFields):
     task = models.ForeignKey(Task, related_name='task_solution', on_delete=models.CASCADE)
     student = models.ForeignKey(User, on_delete=models.CASCADE)
-    is_completed = models.BooleanField(default=False)
+    # is_completed = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['-id']
@@ -238,7 +238,7 @@ class TaskSolution(CommonFields):
         verbose_name_plural = 'Статус задач'
 
     def __str__(self):
-        return self.id
+        return str(self.id)
 
 
 class LectureCompletion(CommonFields):
@@ -257,8 +257,10 @@ class LectureCompletion(CommonFields):
     def calculate_completion(self):
         tasks = Task.objects.filter(lecture=self.lecture)
         task_solution_total = TaskSolution.objects.filter(task__in=tasks)
-        completion_percentage = (task_solution_total.filter(student=self.student).count() / task_solution_total.count()) * 100
-        return completion_percentage > const.is_opened_percent
+        if task_solution_total:
+            completion_percentage = (task_solution_total.filter(student=self.student).count() / task_solution_total.count()) * 100
+            return completion_percentage > const.is_opened_percent
+        return False
 
 
 class Contacts(CommonFields):
