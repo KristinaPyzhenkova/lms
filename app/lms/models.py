@@ -157,6 +157,19 @@ class User(AbstractUser, CommonFields):
         return self.email
 
 
+class UploadedFile(CommonFields):
+    file = models.FileField(upload_to='uploads/')
+    owner = models.ForeignKey(User, related_name='owner_upload', on_delete=models.CASCADE)
+
+    class Meta:
+        ordering = ['-id']
+        verbose_name = 'Загрузка'
+        verbose_name_plural = 'Загрузки'
+
+    def __str__(self):
+        return str(self.id)
+
+
 class Communication(CommonFields):
     sender = models.ForeignKey(User, related_name='sent_messages', on_delete=models.CASCADE)
     recipient = models.ForeignKey(User, related_name='received_messages', on_delete=models.CASCADE)
@@ -256,9 +269,9 @@ class LectureCompletion(CommonFields):
     @property
     def calculate_completion(self):
         tasks = Task.objects.filter(lecture=self.lecture)
-        task_solution_total = TaskSolution.objects.filter(task__in=tasks)
+        task_solution_total = TaskSolution.objects.filter(task__in=tasks, student=self.student)
         if task_solution_total:
-            completion_percentage = (task_solution_total.filter(student=self.student).count() / task_solution_total.count()) * 100
+            completion_percentage = (task_solution_total.count() / tasks.count()) * 100
             return completion_percentage > const.is_opened_percent
         return False
 
@@ -306,3 +319,11 @@ class Contacts(CommonFields):
         blank=True,
         null=True,
     )
+
+    class Meta:
+        ordering = ['-id']
+        verbose_name = 'Контакты'
+        verbose_name_plural = 'Контакт'
+
+    def __str__(self):
+        return str(self.id)

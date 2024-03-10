@@ -9,6 +9,7 @@ router = SimpleRouter()
 router.register('user', views.UserViewSet, basename='user')
 router.register('message', views.CommunicationViewSet, basename='message')
 router.register('course', views.CourseViewSet, basename='course')
+router.register('file', views.UploadedFileViewSet, basename='file')
 
 
 urlpatterns = [

@@ -23,6 +23,7 @@ from rest_framework.exceptions import (
     PermissionDenied,
 )
 from rest_framework.parsers import MultiPartParser
+from django.http import FileResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -684,7 +685,7 @@ class CourseViewSet(viewsets.ModelViewSet):
             request_data['course'] = course_id
             text = request_data['text'].replace("'", '"')
             request_data['text'] = json.loads(text)
-            serializer = serializers.TaskSerializer(data=request_data)
+            serializer = serializers.TaskSerializer(data=request_data, context={'request': request})
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data, status=201)
@@ -694,26 +695,28 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(
         detail=False,
         methods=['GET'],
-        url_path='tasks/(?P<lecture_id>[0-9]+)',
+        url_path='tasks/(?P<lecture_id>[0-9]+)/(?P<type_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
-    def get_tasks_lecture_id(self, request, lecture_id):
+    def get_tasks_lecture_id(self, request, lecture_id, type_id):
+        type_task = 'question' if int(type_id) == 1 else 'task'
         if not request.user.course.filter(lecture_course=lecture_id).exists():
             return Response({'message': 'Лекция не найден'}, status=404)
-        tasks = models.Task.objects.filter(lecture_id=lecture_id)
-        serializer = serializers.TaskSerializer(tasks, many=True)
+        tasks = models.Task.objects.filter(lecture_id=lecture_id, type_task=type_task)
+        serializer = serializers.TaskSerializer(tasks, many=True, context={'request': request})
         return Response(serializer.data)
     
     @action(
         detail=True,
         methods=['GET'],
-        url_path='tasks',
+        url_path='tasks/(?P<type_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
-    def get_tasks(self, request, pk):
+    def get_tasks(self, request, pk, type_id):
+        type_task = 'question' if int(type_id) == 1 else 'task'
         if not request.user.course.filter(id=pk).exists():
             return Response({'message': 'Курс не найден'}, status=404)
-        tasks = models.Task.objects.filter(course_id=pk)
+        tasks = models.Task.objects.filter(course_id=pk, type_task=type_task)
         serializer = serializers.ListTaskSerializer([tasks], many=True, context={'request': request, 'pk': pk})
         return Response(serializer.data)
     
@@ -767,16 +770,14 @@ class CourseViewSet(viewsets.ModelViewSet):
     def create_task_solution(self, request):
         request_data = request.data
         answer = request_data.pop('answer')
-        print(f'{answer = }')
         if request.user.role == models.User.STUDENT:
         # if True:
             try:
                 task = models.Task.objects.get(id=request_data['task'], course__user_course=request.user)
-                print(f'{task = }')
             except models.Task.DoesNotExist:
                 returnResponse({'message': 'Задача не найдена'}, status=404)
-            print(f'{task.text["answer"] = }')
-            if task.text['answer'] != answer:
+            # log_info(f'{task.text["answers"][str(answer)]["is_correct"] = }')
+            if task.type_task == 'question' and not task.text["answers"][str(answer)]["is_correct"]:
                 return Response({'message': 'Задача решена не верно'}, status=404)
             
             request_data['student'] = request.user.pk
@@ -787,6 +788,91 @@ class CourseViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data, status=201)
             return Response(serializer.errors, status=400)
         return Response({'message': 'Недостаточно прав'}, status=403)
+    
+    @action(
+        detail=False,
+        methods=['POST'],
+        url_path='solutions',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'lecture': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='lecture',
+                    example=1
+                ),
+                'solutions': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'task': openapi.Schema(
+                                type=openapi.TYPE_INTEGER,
+                                description='task id',
+                                example=1
+                            ),
+                            'answer': openapi.Schema(
+                                type=openapi.TYPE_INTEGER,
+                                description='answer id',
+                                example=1
+                            )
+                        },
+                    ),
+                ),
+            },
+        ),
+        responses={
+            201: openapi.Response(
+                description='OK',
+            ),
+            400: openapi.Response(
+                description='HTTP_400_BAD_REQUEST',
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def create_task_solutions(self, request):
+        solutions = request.data.get('solutions', [])
+        lecture = request.data.get('lecture')
+        correct_count = 0
+        total_tasks = models.Task.objects.filter(course__user_course=request.user, lecture=lecture)
+        if len(solutions) < total_tasks.count() / 100 * const.is_opened_percent:
+            return Response({'message': 'Недостаточно правильных решений'}, status=status.HTTP_404_NOT_FOUND)
+
+        for solution_data in solutions:
+            task_id = solution_data.get('task')
+            answer_id = solution_data.pop('answer')
+
+            try:
+                task = models.Task.objects.get(id=task_id, course__user_course=request.user, lecture=lecture)
+            except models.Task.DoesNotExist:
+                return Response({'message': f'Задача с id={task_id} не найдена'}, status=status.HTTP_404_NOT_FOUND)
+
+            if task.type_task == 'question':
+                try:
+                    is_correct = task.text["answers"][str(answer_id)]["is_correct"]
+                except KeyError:
+                    return Response({'message': f'Ответ с id={answer_id} не найден для задачи с id={task_id}'}, status=status.HTTP_404_NOT_FOUND)
+
+                if is_correct:
+                    correct_count += 1
+            else:
+                correct_count += 1
+        if correct_count / total_tasks.count() >= const.is_opened_percent / 100:
+            for solution_data in solutions:
+                solution_data['student'] = request.user.pk
+            serializer = serializers.TaskSolutionSerializer(data=solutions, many=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'message': 'Недостаточно правильных решений'}, status=status.HTTP_404_NOT_FOUND)
 
     @action(
         detail=False,
@@ -841,7 +927,7 @@ class CourseViewSet(viewsets.ModelViewSet):
                 text = request_data['text'].replace("'", '"')
                 request_data['text'] = json.loads(text)
             log_info(f'{request_data = }')
-            serializer = serializers.TaskSerializer(task, data=request_data)
+            serializer = serializers.TaskSerializer(task, data=request_data, context={'request': request})
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data)
@@ -879,3 +965,64 @@ class ManagerStudentsView(APIView):
                 students_with_courses.append((student, course))
         serializer = serializers.ManagerStudentSerializer(students_with_courses, context={"request": request}, many=True)
         return Response(serializer.data)
+
+
+class UploadedFileViewSet(viewsets.ViewSet):
+    queryset = models.UploadedFile.objects.all()
+    parser_classes = (MultiPartParser,)
+
+    @action(
+        detail=False,
+        methods=['GET'],
+        permission_classes=[IsAuthenticated]
+    )
+    def list_upload(self, request):
+        files = models.UploadedFile.objects.filter(owner=request.user)
+        serializer = serializers.UploadedFileSerializer(files, many=True)
+        return Response(serializer.data)
+
+    @swagger_auto_schema(
+        manual_parameters=[openapi.Parameter(
+            name="file",
+            in_=openapi.IN_FORM,
+            type=openapi.TYPE_FILE,
+            required=True,
+            description="Document"
+        )],
+        required=['file']
+    )    
+    def create(self, request):
+        request_data = request.data
+        request_data['owner'] = request.user.pk
+        file_serializer = serializers.UploadedFileSerializer(data=request_data)
+        if file_serializer.is_valid():
+            file_serializer.save()
+            return Response(file_serializer.data, status=201)
+        else:
+            return Response(file_serializer.errors, status=400)
+
+    @action(
+        detail=True,
+        methods=['GET'],
+        permission_classes=[IsAuthenticated]
+    )
+    def retrieve_upload(self, request, pk=None):
+        try:
+            uploaded_file = models.UploadedFile.objects.get(pk=pk, owner=request.user)
+        except models.UploadedFile.DoesNotExist:
+            return Response({'message': 'Файл не найден'}, status=404)
+        file_path = uploaded_file.file.path
+        return FileResponse(open(file_path, 'rb'), as_attachment=True)
+    
+    @action(
+        detail=True,
+        methods=['DELETE'],
+        permission_classes=[IsAuthenticated]
+    )
+    def delete_upload(self, request, pk=None):
+        try:
+            uploaded_file = models.UploadedFile.objects.get(pk=pk, owner=request.user)
+            uploaded_file.delete()
+            return Response({'message': 'Файл успешно удален'}, status=204)
+        except models.UploadedFile.DoesNotExist:
+            return Response({'message': 'Файл не найден'}, status=404)

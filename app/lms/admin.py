@@ -102,6 +102,7 @@ class TaskAdmin(admin.ModelAdmin):
         'lecture',
         'name',
         'text',
+        'type_task'
     )
     search_fields = ('course__name', 'lecture__name')
     empty_value_display = '-пусто-'
@@ -150,3 +151,13 @@ class ContactsAdmin(admin.ModelAdmin):
     search_fields = ('user__email', 'email')
     empty_value_display = '-пусто-'
     ordering = ('-id',)
+
+
+@admin.register(models.UploadedFile)
+class UploadedFileAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'file',
+        'owner',
+        'created',
+    )

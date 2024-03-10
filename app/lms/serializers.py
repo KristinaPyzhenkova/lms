@@ -180,9 +180,15 @@ class LectureSerializer(serializers.ModelSerializer):
 
 
 class TaskSerializer(serializers.ModelSerializer):
+    is_completed = serializers.SerializerMethodField()
     class Meta:
         model = models.Task
-        fields = ['id', 'course', 'lecture', 'name', 'text', 'type_task']
+        fields = ['id', 'course', 'lecture', 'name', 'text', 'type_task', 'is_completed']
+    
+    def get_is_completed(self, instance):
+        # print(f'{}')
+        user = self.context['request'].user
+        return models.TaskSolution.objects.filter(task=instance, student=user).exists()
 
 
 class ListTaskSerializer(serializers.ModelSerializer):
@@ -208,13 +214,10 @@ class ListTaskSerializer(serializers.ModelSerializer):
 
 class TaskSolutionSerializer(serializers.ModelSerializer):
     task = serializers.PrimaryKeyRelatedField(
-        queryset=models.Task.objects.all(),
-        # source='task_solution',
-        # write_only=True
+        queryset=models.Task.objects.all()
     )
     student = serializers.PrimaryKeyRelatedField(
-        queryset=models.User.objects.all(),
-        # write_only=True
+        queryset=models.User.objects.all()
     )
 
     class Meta:
@@ -235,13 +238,12 @@ class TaskSolutionSerializer(serializers.ModelSerializer):
         return task_solution
 
 class ManagerStudentSerializer(serializers.ModelSerializer):
-    course_id = serializers.SerializerMethodField()  # Добавляем поле course_id
+    course_id = serializers.SerializerMethodField()
     course_name = serializers.SerializerMethodField()
     messages_count = serializers.SerializerMethodField()
     tasks_progress = serializers.SerializerMethodField()
     lectures_progress = serializers.SerializerMethodField()
     created = serializers.SerializerMethodField()
-    # reg_date = serializers.SerializerMethodField()
     uploads = serializers.SerializerMethodField()
     contacts = serializers.SerializerMethodField()
 
@@ -262,7 +264,8 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
         total_lectures = models.LectureCompletion.objects.filter(student=user, lecture__course=course)
         completed_lectures = [lecture for lecture in total_lectures if lecture.calculate_completion]
         representation['lectures_progress'] = f"{len(completed_lectures)}/{total_lectures.count()}"
-        representation['uploads'] = '0/0'
+        total_uploads = models.UploadedFile.objects.filter(owner=user).count()
+        representation['uploads'] = f'{total_uploads}/10'
         representation['contacts'] = f'{course.contact_course.all().count()}/10'
         return representation
     
@@ -284,11 +287,14 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
     def get_lectures_progress(self, obj):
         return None
     
-    # def get_reg_date(self, obj):
-    #     return None
-    
     def get_uploads(self, obj):
         return None
     
     def get_contacts(self, obj):
         return None
+
+
+class UploadedFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.UploadedFile
+        fields = ['id', 'file', 'owner']
