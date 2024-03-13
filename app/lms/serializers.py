@@ -212,6 +212,19 @@ class ListTaskSerializer(serializers.ModelSerializer):
         return tasks_.count()
 
 
+class LectureCompletionSerializer(serializers.ModelSerializer):
+    lecture = serializers.PrimaryKeyRelatedField(
+        queryset=models.Lecture.objects.all()
+    )
+    student = serializers.PrimaryKeyRelatedField(
+        queryset=models.User.objects.all()
+    )
+
+    class Meta:
+        model = models.LectureCompletion
+        fields = ['id', 'lecture', 'student']
+
+
 class TaskSolutionSerializer(serializers.ModelSerializer):
     task = serializers.PrimaryKeyRelatedField(
         queryset=models.Task.objects.all()
@@ -249,7 +262,7 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.User
-        fields = ['first_name', 'last_name', 'email', 'phone_number', 'state', 'course_id', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress', 'created', 'uploads', 'contacts']
+        fields = ['id', 'first_name', 'last_name', 'email', 'phone_number', 'state', 'course_id', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress', 'created', 'uploads', 'contacts']
 
     def to_representation(self, instance):
         user, course = instance
@@ -258,19 +271,19 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
         representation['course_id'] = course.id
         representation['course_name'] = course.name
         representation['messages_count'] = models.Communication.objects.filter(Q(sender=mentor, recipient=user) | Q(sender=user, recipient=mentor)).count()
-        total_tasks = models.Task.objects.filter(course=course)
-        completed_tasks = models.TaskSolution.objects.filter(student=user, task__course=course)
+        total_tasks = models.Task.objects.filter(course=course, type_task='task')
+        completed_tasks = models.TaskSolution.objects.filter(student=user, task__in=total_tasks)
         representation['tasks_progress'] = f"{completed_tasks.count()}/{total_tasks.count()}"
         total_lectures = models.LectureCompletion.objects.filter(student=user, lecture__course=course)
         completed_lectures = [lecture for lecture in total_lectures if lecture.calculate_completion]
         representation['lectures_progress'] = f"{len(completed_lectures)}/{total_lectures.count()}"
         total_uploads = models.UploadedFile.objects.filter(owner=user).count()
-        representation['uploads'] = f'{total_uploads}/10'
+        representation['uploads'] = f'{total_uploads}/3'
         representation['contacts'] = f'{course.contact_course.all().count()}/10'
         return representation
     
     def get_created(self, instance):
-        return instance.created.date().isoformat()
+        return instance.created.date().strftime("%d.%m.%Y")
     
     def get_course_id(self, obj):
         return None

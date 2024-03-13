@@ -723,14 +723,31 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=['GET'],
-        url_path='solutions',
+        url_path='solution_tasks/(?P<type_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
-    def get_task_solution(self, request, pk):
+    def get_task_solution(self, request, pk, type_id):
+        type_task = 'question' if int(type_id) == 1 else 'task'
         if not request.user.course.filter(id=pk).exists():
             return Response({'message': 'Курс не найден'}, status=404)
-        tasks = models.TaskSolution.objects.filter(task__course=pk)
+        tasks = models.Task.objects.filter(course_id=pk, type_task=type_task)
+        tasks = models.TaskSolution.objects.filter(task__in=tasks)
         serializer = serializers.TaskSolutionSerializer(tasks, many=True)
+        return Response(serializer.data)
+    
+
+    @action(
+        detail=True,
+        methods=['GET'],
+        url_path='solution_lectures',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_lecture_solution(self, request, pk):
+        if not request.user.course.filter(id=pk).exists():
+            return Response({'message': 'Курс не найден'}, status=404)
+        lecture = models.LectureCompletion.objects.filter(lecture__course=pk)
+        solved_lecture = [lc for lc in lecture if lc.calculate_completion]
+        serializer = serializers.LectureCompletionSerializer(solved_lecture, many=True)
         return Response(serializer.data)
     
     @action(
@@ -974,6 +991,20 @@ class UploadedFileViewSet(viewsets.ViewSet):
     @action(
         detail=False,
         methods=['GET'],
+        url_path='student/(?P<user_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_upload_student(self, request, user_id):
+        student = get_object_or_404(models.User, id=user_id)
+        if request.user.role != models.User.MENTOR or not request.user.course.filter(id__in=student.course.all()).exists():
+            return Response({'message': 'Студент не относится к ментору'}, status=404)
+        files = models.UploadedFile.objects.filter(owner=student)
+        serializer = serializers.UploadedFileSerializer(files, many=True)
+        return Response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=['GET'],
         permission_classes=[IsAuthenticated]
     )
     def list_upload(self, request):
@@ -1008,9 +1039,14 @@ class UploadedFileViewSet(viewsets.ViewSet):
     )
     def retrieve_upload(self, request, pk=None):
         try:
-            uploaded_file = models.UploadedFile.objects.get(pk=pk, owner=request.user)
+            uploaded_file = models.UploadedFile.objects.get(pk=pk)
         except models.UploadedFile.DoesNotExist:
             return Response({'message': 'Файл не найден'}, status=404)
+        student = uploaded_file.owner
+        if request.user.role == models.User.MENTOR and not request.user.course.filter(id__in=student.course.all()).exists():
+            return Response({'message': 'Файл принадлежит студенту который не относиться к ментору'}, status=404)
+        if request.user.role == models.User.STUDENT and uploaded_file.owner != request.user:
+            return Response({'message': 'Недостаточно прав'}, status=404)
         file_path = uploaded_file.file.path
         return FileResponse(open(file_path, 'rb'), as_attachment=True)
     
