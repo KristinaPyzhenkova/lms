@@ -1031,6 +1031,50 @@ class UploadedFileViewSet(viewsets.ViewSet):
             return Response(file_serializer.data, status=201)
         else:
             return Response(file_serializer.errors, status=400)
+    
+    @action(
+        detail=False,
+        methods=['POST'],
+        url_path='signature',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                name="files",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Items(type=openapi.TYPE_FILE),
+                required=True,
+                description="List of documents (up to 3)"
+            )
+        ],
+        required=['files']
+    )
+    def create_signature(self, request):
+        files = request.FILES.getlist('files')
+        owner = request.user.pk
+        if request.user.role == models.User.MENTOR:
+            return Response({'message': 'Ожидается студент.'}, status=404)
+
+        # Проверяем, что количество файлов не превышает 3
+        if len(files) > 3:
+            return Response("You can upload up to 3 files at once", status=status.HTTP_400_BAD_REQUEST)
+
+        # Обрабатываем каждый файл
+        responses = []
+        for file in files:
+            file_data = {'file': file, 'owner': owner}
+            file_serializer = serializers.UploadedFileSerializer(data=file_data)
+            if file_serializer.is_valid():
+                file_serializer.save()
+                responses.append(file_serializer.data)
+            else:
+                return Response(file_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        request.user.signature = True
+        request.user.save()
+        return Response(responses, status=status.HTTP_201_CREATED)
 
     @action(
         detail=True,

@@ -37,6 +37,7 @@ class UserAdmin(admin.ModelAdmin):
         'state',
         'zip_val',
         'course_list',
+        'signature',
     )
     form = CourseAdminForm
     search_fields = ('email',)

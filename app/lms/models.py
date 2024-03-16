@@ -141,6 +141,7 @@ class User(AbstractUser, CommonFields):
         blank=True,
         verbose_name='Курс'
     )
+    signature = models.BooleanField(default=False)
     username = None
 
     USERNAME_FIELD = 'email'
