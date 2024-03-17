@@ -537,8 +537,32 @@ class CourseViewSet(viewsets.ModelViewSet):
         if not request.user.course.filter(id=course_id).exists():
             return Response({'message': 'Лекция не найдена'}, status=404)
         lectures = models.Lecture.objects.filter(course_id=course_id)
-        serializer = serializers.LectureSerializer(lectures, many=True)
+        serializer = serializers.GetLectureSerializer(
+            lectures,
+            context={'user': request.user},
+            many=True
+        )
         return Response(serializer.data)
+    
+    @action(
+        detail=True,
+        methods=['GET'],
+        url_path='lectures_completed',
+        permission_classes=[IsAuthenticated]
+    )
+    def get_lectures_completed(self, request, pk):
+        course_id = pk
+        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+            students_on_course = models.User.objects.filter(course__id=course_id, role=models.User.STUDENT)
+            log_info(f'{students_on_course = }')
+            serializer = serializers.LectureWithUserSerializer(
+                students_on_course,
+                context={'course_id': course_id},
+                many=True
+            )
+            return Response(serializer.data)
+            
+                
 
     @action(
         detail=False,
@@ -557,6 +581,8 @@ class CourseViewSet(viewsets.ModelViewSet):
         else:
             try:
                 models.LectureCompletion.objects.get(lecture=lecture, student=request.user)
+                serializer = serializers.LectureSerializer(lecture)
+                return Response(serializer.data)
             except models.LectureCompletion.DoesNotExist:
                 return Response({'message': 'Лекция еще не открыта'}, status=404)
 
@@ -809,7 +835,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     @action(
         detail=False,
         methods=['POST'],
-        url_path='solutions',
+        url_path='solutions/(?P<type_id>[0-9]+)',
         permission_classes=[IsAuthenticated]
     )
     @swagger_auto_schema(
@@ -853,11 +879,13 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         }
     )
-    def create_task_solutions(self, request):
+    def create_task_solutions(self, request, type_id):
+        type_task = 'question' if int(type_id) == 1 else 'task'
         solutions = request.data.get('solutions', [])
         lecture = request.data.get('lecture')
         correct_count = 0
-        total_tasks = models.Task.objects.filter(course__user_course=request.user, lecture=lecture)
+        total_tasks = models.Task.objects.filter(course__user_course=request.user, lecture=lecture, type_task=type_task)
+        log_info(f'{total_tasks.count() = } {len(solutions) = }')
         if len(solutions) < total_tasks.count() / 100 * const.is_opened_percent:
             return Response({'message': 'Недостаточно правильных решений'}, status=status.HTTP_404_NOT_FOUND)
 

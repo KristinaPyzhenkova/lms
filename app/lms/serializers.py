@@ -88,6 +88,7 @@ class ProfileSerializer(serializers.ModelSerializer):
             'email',
             'email_personal',
             'role',
+            'signature',
             'first_name',
             'last_name',
             'address',
@@ -177,6 +178,49 @@ class LectureSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Lecture
         fields = ['id', 'name', 'content', 'course']
+
+
+class GetLectureSerializer(serializers.ModelSerializer):
+    is_completed = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.Lecture
+        fields = ['id', 'name', 'content', 'course', 'is_completed']
+    
+    def get_is_completed(self, obj):
+        user = self.context['user']
+        lecture_completion = models.LectureCompletion.objects.filter(lecture=obj, student=user).first()
+        if lecture_completion:
+            return lecture_completion.calculate_completion
+        return False
+
+
+class LectureWithUserSerializer(serializers.Serializer):
+    lectures = GetLectureSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = models.User
+        fields = ['id', 'lectures']
+
+    def to_representation(self, instance):
+        course_id = self.context['course_id']
+        course = instance.course.filter(pk=course_id).first()
+        if course:
+            lectures = course.lecture_course.all()
+            serialized_lectures = GetLectureSerializer(
+                lectures,
+                context={'user': instance},
+                many=True
+            ).data
+            return {
+                'user_id': instance.id,
+                'lectures': serialized_lectures
+            }
+        else:
+            return {
+                'user_id': instance.id,
+                'lectures': []
+            }
 
 
 class TaskSerializer(serializers.ModelSerializer):
