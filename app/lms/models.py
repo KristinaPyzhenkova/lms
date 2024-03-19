@@ -135,12 +135,6 @@ class User(AbstractUser, CommonFields):
     zip_val = models.PositiveIntegerField(
         default=0
     )
-    course = models.ManyToManyField(
-        Course,
-        related_name='user_course',
-        blank=True,
-        verbose_name='Курс'
-    )
     signature = models.BooleanField(default=False)
     username = None
 
@@ -156,6 +150,12 @@ class User(AbstractUser, CommonFields):
 
     def __str__(self):
         return self.email
+
+
+class UserCourse(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='user_course')
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='user_course')
+    trash_flag = models.BooleanField(default=False)
 
 
 class UploadedFile(CommonFields):

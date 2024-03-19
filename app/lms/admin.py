@@ -20,7 +20,22 @@ class CourseAdminForm(forms.ModelForm):
         widget=FilteredSelectMultiple('Course', is_stacked=False)
     )
 
+    def save(self, commit=True):
+        user_instance = super().save(commit=False)
+        user_instance.save()
+        courses = self.cleaned_data.get('course')
+        for course in courses:
+            models.UserCourse.objects.create(user=user_instance, course=course)
+        return user_instance
 
+
+@admin.register(models.UserCourse)
+class UserCourseAdmin(admin.ModelAdmin):
+    list_display = (
+        'user',
+        'course',
+        'trash_flag',
+    )
 
 @admin.register(models.User)
 class UserAdmin(admin.ModelAdmin):
@@ -49,7 +64,7 @@ class UserAdmin(admin.ModelAdmin):
     list_display_links = ('id',)
 
     def course_list(self, obj):
-        return ", ".join([str(course) for course in obj.course.all()])
+        return ", ".join([str(user_course.course) for user_course in obj.user_course.all()])
 
     course_list.short_description = 'courses'
 

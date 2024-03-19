@@ -300,8 +300,7 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        queryset = user.course.all()
-        return queryset
+        return models.Course.objects.filter(user_course__in=user.user_course.all())
 
     @action(
         detail=True,
@@ -364,7 +363,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_contacts(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+        if request.user.role == models.User.MENTOR and request.user_course.filter(course_id=course_id).exists():
             request_data = request.data
             request_data['course'] = course_id
             serializer = serializers.ContactsSerializer(data=request_data)
@@ -382,7 +381,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_contact(self, request, pk):
         course_id = pk
-        if not request.user.course.filter(id=course_id).exists():
+        if not request.user.user_course.filter(course_id=course_id).exists():
             return Response({'message': 'Контакт не найден'}, status=404)
         contacts = models.Contacts.objects.filter(course_id=course_id)
         serializer = serializers.ContactsSerializer(contacts, many=True)
@@ -444,7 +443,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def update_contact(self, request, contacts_id, pk=None):
         try:
-            contact = models.Contacts.objects.get(pk=contacts_id, course__user_course=request.user)
+            contact = models.Contacts.objects.get(pk=contacts_id, course__user_course__user=request.user)
         except models.Contacts.DoesNotExist:
             return Response({'message': 'Контакт не найден'}, status=404)
 
@@ -514,7 +513,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_lecture(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
             request_data = request.data
             request_data['course'] = course_id
             content = request_data['content'].replace("'", '"')
@@ -534,7 +533,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_lectures(self, request, pk):
         course_id = pk
-        if not request.user.course.filter(id=course_id).exists():
+        if not request.user.user_course.filter(course_id=course_id).exists():
             return Response({'message': 'Лекция не найдена'}, status=404)
         lectures = models.Lecture.objects.filter(course_id=course_id)
         serializer = serializers.GetLectureSerializer(
@@ -552,8 +551,8 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_lectures_completed(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
-            students_on_course = models.User.objects.filter(course__id=course_id, role=models.User.STUDENT)
+        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
+            students_on_course = models.User.objects.filter(user_course__course_id=course_id, role=models.User.STUDENT)
             log_info(f'{students_on_course = }')
             serializer = serializers.LectureWithUserSerializer(
                 students_on_course,
@@ -572,7 +571,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_lecture_id(self, request, lecture_id):
         try:
-            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course=request.user)
+            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course__user=request.user)
         except models.Lecture.DoesNotExist:
             return Response({'message': 'Лекция не найдена'}, status=404)
         if request.user.role == models.User.MENTOR:
@@ -622,7 +621,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def update_lecture(self, request, lecture_id):
         try:
-            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course=request.user)
+            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course__user=request.user)
         except models.Lecture.DoesNotExist:
             return Response({'message': 'Лекция не найдена'}, status=404)
         if request.user.role == models.User.MENTOR:
@@ -647,7 +646,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def delete_lecture(self, request, lecture_id):
         try:
-            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course=request.user)
+            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course__user=request.user)
         except models.Lecture.DoesNotExist:
             return Response({'message': 'Лекция не найдена'}, status=404)
 
@@ -703,7 +702,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_tasks(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.course.filter(id=course_id).exists():
+        if request.user.role == models.User.MENTOR and request.user.user_course.course.filter(id=course_id).exists():
             lecture = models.Lecture.objects.filter(course_id=course_id)
             if not lecture.exists():
                 return Response({'message': 'Недостаточно прав'}, status=403) 
@@ -726,7 +725,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_tasks_lecture_id(self, request, lecture_id, type_id):
         type_task = 'question' if int(type_id) == 1 else 'task'
-        if not request.user.course.filter(lecture_course=lecture_id).exists():
+        if not request.user.user_course.filter(course__lecture_course=lecture_id).exists():
             return Response({'message': 'Лекция не найден'}, status=404)
         tasks = models.Task.objects.filter(lecture_id=lecture_id, type_task=type_task)
         serializer = serializers.TaskSerializer(tasks, many=True, context={'request': request})
@@ -740,7 +739,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_tasks(self, request, pk, type_id):
         type_task = 'question' if int(type_id) == 1 else 'task'
-        if not request.user.course.filter(id=pk).exists():
+        if not request.user.user_course.filter(course_id=pk).exists():
             return Response({'message': 'Курс не найден'}, status=404)
         tasks = models.Task.objects.filter(course_id=pk, type_task=type_task)
         serializer = serializers.ListTaskSerializer([tasks], many=True, context={'request': request, 'pk': pk})
@@ -754,7 +753,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_task_solution(self, request, pk, type_id):
         type_task = 'question' if int(type_id) == 1 else 'task'
-        if not request.user.course.filter(id=pk).exists():
+        if not request.user.user_course.filter(course_id=pk).exists():
             return Response({'message': 'Курс не найден'}, status=404)
         tasks = models.Task.objects.filter(course_id=pk, type_task=type_task)
         tasks = models.TaskSolution.objects.filter(task__in=tasks)
@@ -769,7 +768,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         permission_classes=[IsAuthenticated]
     )
     def get_lecture_solution(self, request, pk):
-        if not request.user.course.filter(id=pk).exists():
+        if not request.user.user_course.filter(course_id=pk).exists():
             return Response({'message': 'Курс не найден'}, status=404)
         lecture = models.LectureCompletion.objects.filter(lecture__course=pk)
         solved_lecture = [lc for lc in lecture if lc.calculate_completion]
@@ -816,7 +815,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         if request.user.role == models.User.STUDENT:
         # if True:
             try:
-                task = models.Task.objects.get(id=request_data['task'], course__user_course=request.user)
+                task = models.Task.objects.get(id=request_data['task'], course__user_course__user=request.user)
             except models.Task.DoesNotExist:
                 returnResponse({'message': 'Задача не найдена'}, status=404)
             # log_info(f'{task.text["answers"][str(answer)]["is_correct"] = }')
@@ -884,7 +883,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         solutions = request.data.get('solutions', [])
         lecture = request.data.get('lecture')
         correct_count = 0
-        total_tasks = models.Task.objects.filter(course__user_course=request.user, lecture=lecture, type_task=type_task)
+        total_tasks = models.Task.objects.filter(course__user_course__user=request.user, lecture=lecture, type_task=type_task)
         log_info(f'{total_tasks.count() = } {len(solutions) = }')
         if len(solutions) < total_tasks.count() / 100 * const.is_opened_percent:
             return Response({'message': 'Недостаточно правильных решений'}, status=status.HTTP_404_NOT_FOUND)
@@ -894,7 +893,7 @@ class CourseViewSet(viewsets.ModelViewSet):
             answer_id = solution_data.pop('answer')
 
             try:
-                task = models.Task.objects.get(id=task_id, course__user_course=request.user, lecture=lecture)
+                task = models.Task.objects.get(id=task_id, course__user_course__user=request.user, lecture=lecture)
             except models.Task.DoesNotExist:
                 return Response({'message': f'Задача с id={task_id} не найдена'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -960,7 +959,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def update_task(self, request, task_id):
         try:
-            task = models.Task.objects.get(pk=task_id, course__user_course=request.user)
+            task = models.Task.objects.get(pk=task_id, course__user_course__user=request.user)
         except models.Task.DoesNotExist:
             return Response({'message': 'Задача не найден'}, status=404)
 
@@ -987,7 +986,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def delete_task(self, request, task_id):
         try:
-            task = models.Task.objects.get(pk=task_id, course__user_course=request.user)
+            task = models.Task.objects.get(pk=task_id, course__user_course__user=request.user)
         except models.Task.DoesNotExist:
             return Response({'message': 'Задача не найдена'}, status=404)
 
@@ -1002,12 +1001,12 @@ class ManagerStudentsView(APIView):
 
     def get(self, request):
         user = request.user
-        courses = user.course.all()
+        courses = models.Course.objects.filter(user_course__in=user.user_course.all())
         students_with_courses = []
         for course in courses:
-            students_on_course = course.user_course.filter(role=models.User.STUDENT)
+            students_on_course = course.user_course.filter(user__role=models.User.STUDENT)
             for student in students_on_course:
-                students_with_courses.append((student, course))
+                students_with_courses.append((student.user, course))
         serializer = serializers.ManagerStudentSerializer(students_with_courses, context={"request": request}, many=True)
         return Response(serializer.data)
 
@@ -1024,7 +1023,7 @@ class UploadedFileViewSet(viewsets.ViewSet):
     )
     def get_upload_student(self, request, user_id):
         student = get_object_or_404(models.User, id=user_id)
-        if request.user.role != models.User.MENTOR or not request.user.course.filter(id__in=student.course.all()).exists():
+        if request.user.role != models.User.MENTOR or not request.user_course.filter(course_id__in=student.course.all()).exists():
             return Response({'message': 'Студент не относится к ментору'}, status=404)
         files = models.UploadedFile.objects.filter(owner=student)
         serializer = serializers.UploadedFileSerializer(files, many=True)
@@ -1073,14 +1072,14 @@ class UploadedFileViewSet(viewsets.ViewSet):
                 in_=openapi.IN_FORM,
                 type=openapi.TYPE_ARRAY,
                 items=openapi.Items(type=openapi.TYPE_FILE),
-                required=True,
+                required=False,
                 description="List of documents (up to 3)"
             )
         ],
-        required=['files']
     )
     def create_signature(self, request):
         files = request.FILES.getlist('files')
+        log_info(f'{files = }')
         owner = request.user.pk
         if request.user.role == models.User.MENTOR:
             return Response({'message': 'Ожидается студент.'}, status=404)
@@ -1115,7 +1114,7 @@ class UploadedFileViewSet(viewsets.ViewSet):
         except models.UploadedFile.DoesNotExist:
             return Response({'message': 'Файл не найден'}, status=404)
         student = uploaded_file.owner
-        if request.user.role == models.User.MENTOR and not request.user.course.filter(id__in=student.course.all()).exists():
+        if request.user.role == models.User.MENTOR and not request.user_course.filter(course_id__in=student.course.all()).exists():
             return Response({'message': 'Файл принадлежит студенту который не относиться к ментору'}, status=404)
         if request.user.role == models.User.STUDENT and uploaded_file.owner != request.user:
             return Response({'message': 'Недостаточно прав'}, status=404)
