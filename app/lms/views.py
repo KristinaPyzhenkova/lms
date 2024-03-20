@@ -23,6 +23,7 @@ from rest_framework.exceptions import (
     PermissionDenied,
 )
 from rest_framework.parsers import MultiPartParser
+from django.db import transaction
 from django.http import FileResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -293,7 +294,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     serializer_class = serializers.CourseSerializer
 
     def get_permissions(self):
-        if self.action == 'create' or self.action == 'update':
+        if self.action in ['create', 'update', 'destroy', 'partial_update', 'put']:
             return [IsMentor()]
         else:
             return [permissions.IsAuthenticated()]
@@ -363,7 +364,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_contacts(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user_course.filter(course_id=course_id).exists():
+        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
             request_data = request.data
             request_data['course'] = course_id
             serializer = serializers.ContactsSerializer(data=request_data)
@@ -560,6 +561,7 @@ class CourseViewSet(viewsets.ModelViewSet):
                 many=True
             )
             return Response(serializer.data)
+        return Response({'message': 'Недостаточно прав'}, status=403)
             
                 
 
@@ -702,7 +704,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_tasks(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.user_course.course.filter(id=course_id).exists():
+        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
             lecture = models.Lecture.objects.filter(course_id=course_id)
             if not lecture.exists():
                 return Response({'message': 'Недостаточно прав'}, status=403) 
@@ -999,17 +1001,94 @@ class CourseViewSet(viewsets.ModelViewSet):
 class ManagerStudentsView(APIView):
     permission_classes = [IsMentor]
 
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                'course_id',
+                openapi.IN_QUERY,
+                description="Id of the course",
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'trash_flag',
+                openapi.IN_QUERY,
+                description="trash_flag of the course",
+                type=openapi.TYPE_INTEGER
+            ),
+        ],
+    )
     def get(self, request):
+        filter_params = request.query_params
+        course_id = request.query_params.get('course_id')
+        trash_flag = request.query_params.get('trash_flag')
         user = request.user
         courses = models.Course.objects.filter(user_course__in=user.user_course.all())
+        if course_id:
+            courses = courses.filter(id=int(course_id))
         students_with_courses = []
         for course in courses:
             students_on_course = course.user_course.filter(user__role=models.User.STUDENT)
             for student in students_on_course:
+                log_info(f'{trash_flag = }')
+                if trash_flag is not None and student.trash_flag != int(trash_flag):
+                    continue
                 students_with_courses.append((student.user, course))
         serializer = serializers.ManagerStudentSerializer(students_with_courses, context={"request": request}, many=True)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'data': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'course_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'student_id': openapi.Schema(type=openapi.TYPE_INTEGER),
+                            'trash_flag': openapi.Schema(type=openapi.TYPE_INTEGER),
+                        },
+                    ),
+                ),
+            },
+            required=['data'],
+        ),
+        responses={200: 'Success', 400: 'Bad request'},
+    )
+    def put(self, request):
+        user = self.request.user
+        if user.role != models.User.MENTOR:
+            return Response({'message': 'Недостаточно прав'}, status=404)
+        all_courses = models.Course.objects.filter(user_course__in=user.user_course.all())
+        data = request.data.get('data')
+        if not data:
+            return Response({"error": "No data provided."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                log_info(f'{data = }')
+                for entry in data:
+                    log_info(f'{entry = }')
+                    course_id = entry.get('course_id')
+                    student_id = entry.get('student_id')
+                    trash_flag = entry.get('trash_flag')
+
+                    if not all([course_id, student_id]) or trash_flag is None:
+                        return Response({"error": "course_id, student_id, and trash_flag are required in each entry."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    course = all_courses.filter(id=course_id).first()
+                    if not course:
+                        return Response({'message': 'Недостаточно прав'}, status=404)
+                    student = models.User.objects.filter(id=student_id).first()
+                    user_course = models.UserCourse.objects.filter(user=student, course=course).first()
+                    if not user_course:
+                        return Response({'message': 'Недостаточно прав'}, status=404)
+                    user_course.trash_flag = trash_flag
+                    user_course.save()
+                
+            return Response({"message": "Trash flags updated successfully."}, status=status.HTTP_200_OK)
+        except (models.Course.DoesNotExist, models.User.DoesNotExist, models.UserCourse.DoesNotExist):
+            return Response({"error": "Course or Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
 class UploadedFileViewSet(viewsets.ViewSet):
     queryset = models.UploadedFile.objects.all()

@@ -79,12 +79,13 @@ class PasswordSerializer(serializers.ModelSerializer):
 
 
 class ProfileSerializer(serializers.ModelSerializer):
+    courses = serializers.SerializerMethodField()
 
     class Meta:
         model = models.User
         fields = (
             'id',
-            'course',
+            'courses',
             'email',
             'email_personal',
             'role',
@@ -97,6 +98,11 @@ class ProfileSerializer(serializers.ModelSerializer):
             'zip_val',
             'phone_number',
         )
+
+    def get_courses(self, instance):
+        print(f'{instance = }')
+        courses = models.Course.objects.filter(user_course__in=self.instance.user_course.all())
+        return ", ".join([str(user_course.name) for user_course in courses])
 
 
 class CommunicationSerializer(serializers.ModelSerializer):
@@ -170,7 +176,7 @@ class CourseSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         user = self.context['request'].user
         course_new = models.Course.objects.create(**validated_data)
-        user.course.add(course_new)
+        models.UserCourse.objects.create(user=user, course=course_new)
         return course_new
 
 
@@ -303,16 +309,24 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
     created = serializers.SerializerMethodField()
     uploads = serializers.SerializerMethodField()
     contacts = serializers.SerializerMethodField()
+    trash = serializers.SerializerMethodField()
 
     class Meta:
         model = models.User
-        fields = ['id', 'first_name', 'last_name', 'email', 'phone_number', 'state', 'course_id', 'course_name', 'messages_count', 'tasks_progress', 'lectures_progress', 'created', 'uploads', 'contacts']
+        fields = [
+            'id', 'first_name',
+            'last_name', 'email', 'phone_number',
+            'state', 'course_id', 'course_name',
+            'messages_count', 'tasks_progress', 'lectures_progress',
+            'created', 'uploads', 'contacts', 'trash'
+        ]
 
     def to_representation(self, instance):
         user, course = instance
         mentor = self.context['request'].user
         representation = super().to_representation(user)
         representation['course_id'] = course.id
+        representation['trash'] = models.UserCourse.objects.get(course=course, user=user).trash_flag
         representation['course_name'] = course.name
         representation['messages_count'] = models.Communication.objects.filter(Q(sender=mentor, recipient=user) | Q(sender=user, recipient=mentor)).count()
         total_tasks = models.Task.objects.filter(course=course, type_task='task')
@@ -333,6 +347,9 @@ class ManagerStudentSerializer(serializers.ModelSerializer):
         return None
     
     def get_course_name(self, obj):
+        return None
+    
+    def get_trash(self, obj):
         return None
 
     def get_messages_count(self, obj):

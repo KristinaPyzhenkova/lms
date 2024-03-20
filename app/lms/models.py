@@ -67,7 +67,7 @@ class Course(CommonFields):
         verbose_name_plural = 'Курсы'
 
     def __str__(self):
-        return self.name
+        return f'{self.name} - {self.id}'
 
 
 class User(AbstractUser, CommonFields):

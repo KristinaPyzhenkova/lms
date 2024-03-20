@@ -20,12 +20,25 @@ class CourseAdminForm(forms.ModelForm):
         widget=FilteredSelectMultiple('Course', is_stacked=False)
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields['course'].initial = models.Course.objects.filter(
+                user_course__in=self.instance.user_course.all()
+            )
+
     def save(self, commit=True):
+        print(f'{commit = }')
         user_instance = super().save(commit=False)
         user_instance.save()
         courses = self.cleaned_data.get('course')
+        existing_courses = models.Course.objects.filter(user_course__in=self.instance.user_course.all())
         for course in courses:
-            models.UserCourse.objects.create(user=user_instance, course=course)
+            if course not in existing_courses:
+                models.UserCourse.objects.create(user=user_instance, course=course)
+        for course in existing_courses:
+            if course not in courses:
+                models.UserCourse.objects.filter(user=user_instance, course=course).delete()
         return user_instance
 
 
