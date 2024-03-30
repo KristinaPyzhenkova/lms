@@ -2,10 +2,11 @@ import datetime
 import typing
 import uuid
 import json
+import os
 
 import requests
 from dateutil.relativedelta import relativedelta
-from django.db.models import Q
+from django.db.models import Q, Min
 from django.http import HttpResponse
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -23,6 +24,7 @@ from rest_framework.exceptions import (
     PermissionDenied,
 )
 from rest_framework.parsers import MultiPartParser
+from django.conf import settings
 from django.db import transaction
 from django.http import FileResponse
 from rest_framework.permissions import IsAuthenticated
@@ -552,6 +554,7 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_lectures_completed(self, request, pk):
         course_id = pk
+        log_info(f'{course_id = } {request.user = }')
         if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
             students_on_course = models.User.objects.filter(user_course__course_id=course_id, role=models.User.STUDENT)
             log_info(f'{students_on_course = }')
@@ -887,6 +890,8 @@ class CourseViewSet(viewsets.ModelViewSet):
         correct_count = 0
         total_tasks = models.Task.objects.filter(course__user_course__user=request.user, lecture=lecture, type_task=type_task)
         log_info(f'{total_tasks.count() = } {len(solutions) = }')
+        if not total_tasks.count():
+            return Response({'message': 'Нет ни одного курса'}, status=status.HTTP_404_NOT_FOUND)
         if len(solutions) < total_tasks.count() / 100 * const.is_opened_percent:
             return Response({'message': 'Недостаточно правильных решений'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -912,6 +917,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         if correct_count / total_tasks.count() >= const.is_opened_percent / 100:
             for solution_data in solutions:
                 solution_data['student'] = request.user.pk
+            log_info(f'{solutions = }')
             serializer = serializers.TaskSolutionSerializer(data=solutions, many=True)
             if serializer.is_valid():
                 serializer.save()
@@ -1090,6 +1096,7 @@ class ManagerStudentsView(APIView):
         except (models.Course.DoesNotExist, models.User.DoesNotExist, models.UserCourse.DoesNotExist):
             return Response({"error": "Course or Student not found."}, status=status.HTTP_404_NOT_FOUND)
 
+
 class UploadedFileViewSet(viewsets.ViewSet):
     queryset = models.UploadedFile.objects.all()
     parser_classes = (MultiPartParser,)
@@ -1102,7 +1109,8 @@ class UploadedFileViewSet(viewsets.ViewSet):
     )
     def get_upload_student(self, request, user_id):
         student = get_object_or_404(models.User, id=user_id)
-        if request.user.role != models.User.MENTOR or not request.user_course.filter(course_id__in=student.course.all()).exists():
+        all_courses = models.Course.objects.filter(user_course__in=student.user_course.all())
+        if request.user.role != models.User.MENTOR or not request.user.user_course.filter(course_id__in=all_courses).exists():
             return Response({'message': 'Студент не относится к ментору'}, status=404)
         files = models.UploadedFile.objects.filter(owner=student)
         serializer = serializers.UploadedFileSerializer(files, many=True)
@@ -1212,3 +1220,283 @@ class UploadedFileViewSet(viewsets.ViewSet):
             return Response({'message': 'Файл успешно удален'}, status=204)
         except models.UploadedFile.DoesNotExist:
             return Response({'message': 'Файл не найден'}, status=404)
+
+
+class SettingsViewSet(viewsets.ModelViewSet):
+    queryset = models.Settings.objects.all()
+    serializer_class = serializers.SettingsSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    parser_classes = [MultiPartParser]
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                name='name',
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description='Name of the setting'
+            ),
+            openapi.Parameter(
+                name='description',
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_STRING,
+                required=False,
+                description='Description of the setting'
+            ),
+            openapi.Parameter(
+                name='is_flag',
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_BOOLEAN,
+                required=False,
+                description='Flag indicating if the setting is active'
+            ),
+            openapi.Parameter(
+                name='num',
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_INTEGER,
+                required=False,
+                description='Number value of the setting'
+            ),
+            openapi.Parameter(
+                name='float_field',
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_NUMBER,
+                required=False,
+                description='Float value of the setting'
+            ),
+            openapi.Parameter(
+                name='content',
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_OBJECT,
+                required=False,
+                description='Content of the setting (JSON data)'
+            ),
+            openapi.Parameter(
+                name="image",
+                in_=openapi.IN_FORM,
+                type=openapi.TYPE_FILE,
+                required=False,
+                description="Document"
+            )
+        ],
+        required=[]
+    )
+    def create(self, request, *args, **kwargs):
+        image = request.data.pop('image')
+        if image:
+            settings_data = request.data.dict()
+            media_root = settings.MEDIA_ROOT
+            image_path = os.path.join(media_root, 'settings', image[0].name)
+            with open(image_path, 'wb') as f:
+                f.write(image[0].read())
+            settings_data['content'] = image_path
+            serializer = self.get_serializer(data=settings_data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        else:
+            return super().create(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        log_info(f'{instance.content = }')
+        if settings.MEDIA_ROOT in instance.content:
+            return FileResponse(open(instance.content, 'rb'), as_attachment=True)
+        else:
+            return super().retrieve(request, *args, **kwargs)
+
+
+@permission_classes([IsAuthenticated, ])
+class EmailViewSet(viewsets.ViewSet):
+
+    def get_queryset(self):
+        user = self.request.user
+        return models.Email.objects.filter(Q(sender=user) | Q(recipient=user)).order_by('created')
+
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'recipient': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='recipient',
+                    example=3
+                ),
+                'contact': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='contact',
+                    example=3
+                ),
+                'message': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='message',
+                    example='Hello!'
+                ),
+            },
+            required=['message', 'contact']
+        ),
+        responses={
+            201: openapi.Response(
+                description='HTTP_201_CREATED',
+            ),
+        },
+    )
+    def create(self, request):
+        user_data = request.data
+        user_data['sender'] = request.user.id
+        contact = models.Contacts.objects.filter(pk=request.data.get('contact')).first()
+        if not contact:
+            return Response({"error": "contact does not exist."}, status=status.HTTP_400_BAD_REQUEST)
+        if request.user.STUDENT:
+            request.data['recipient'] = contact.user.id
+        recipient_id = request.data.get('recipient')
+        message = request.data.get('message')
+        if not recipient_id or not message:
+            return Response({"error": "Recipient ID and message are required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        course = contact.course
+        if (not course.user_course.filter(user=request.user).exists() or 
+            not course.user_course.filter(user_id=recipient_id).exists()):
+            return Response({"error": "contact do not belong current users."}, status=status.HTTP_400_BAD_REQUEST)                        
+        serializer = serializers.EmailSerializer(data=user_data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(
+        detail=True,
+        methods=['GET'],
+        url_path='view/(?P<contacts_id>[0-9]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description='HTTP_200_OK',
+                schema=serializers.ListCommunicationSerializer(),
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def view(self, request, pk, contacts_id):
+        """Просмотр переписки."""
+        if request.user.id == int(pk):
+            return Response({"error": "you can't receive correspondence with you."}, status=status.HTTP_400_BAD_REQUEST)
+        emails = self.get_queryset().filter(
+            (Q(sender=pk) | Q(recipient=pk)) & Q(contact=contacts_id)
+        ).order_by('created')
+        log_info(f'{emails = }')
+        sent_serializer = serializers.ListEmailSerializer(
+            [emails],
+            many=True,
+            context={'request': request, 'pk': pk}
+        )
+        response = Response(sent_serializer.data, status=status.HTTP_200_OK)
+        received_messages = emails.filter(recipient=request.user)
+        received_messages.update(is_read=True, reading_time=timezone.now())
+        return response
+
+
+    @action(
+        detail=False,
+        methods=['GET'],
+        url_path='contacts',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description='HTTP_200_OK',
+                schema=serializers.ListUserCommunicationSerializer(),
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def view_contacts(self, request):
+        """Просмотр имейл контактов для юзера."""
+        user = self.request.user
+        courses_queryset = models.Course.objects.filter(user_course__in=user.user_course.all())
+        unique_contacts = models.Contacts.objects.filter(course__in=courses_queryset).distinct()
+        sent_serializer = serializers.ListEmailContactSerializer(unique_contacts, many=True)
+        return Response(sent_serializer.data, status=status.HTTP_200_OK)
+    
+    @action(
+        detail=False,
+        methods=['GET'],
+        url_path='recipient',
+        permission_classes=[IsMentor]
+    )
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description='HTTP_200_OK',
+                schema=serializers.ListUserCommunicationSerializer(),
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def view_recipient(self, request):
+        """Просмотр имейл recipient для ментора."""
+        user = self.request.user
+        courses_queryset = models.Course.objects.filter(user_course__in=user.user_course.all())
+        students = models.User.objects.filter(user_course__course__in=courses_queryset, role=models.User.STUDENT).distinct()
+        sent_serializer = serializers.ListEmailStudentsSerializer(students, many=True)
+        return Response(sent_serializer.data, status=status.HTTP_200_OK)
+    
+    @action(
+        detail=False,
+        methods=['GET'],
+        url_path='user',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description='HTTP_200_OK',
+                schema=serializers.ListUserCommunicationSerializer(),
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def view_user(self, request):
+        """
+        Просмотр юзеров с кем начата переписка.(
+        менторы: sender - айди контакта, recipient - айди студента; 
+        студенты: sender - айди студента, recipient - айди контакта)
+        """
+        user = self.request.user
+        unique_emails = models.Email.objects.filter(
+            Q(sender=user) | Q(recipient=user)
+        ).values('sender', 'recipient', 'contact').annotate(min_id=Min('id'))
+        unique_combinations = []
+        if user.role == models.User.MENTOR:
+            unique_senders = []
+            unique_contact = []
+            for email in unique_emails:
+                sender = email['recipient'] if email['recipient'] != user.id else email['sender']
+                contact = email['contact']
+                if sender not in unique_senders and contact not in unique_contact:
+                    unique_combinations.append({'sender': contact, 'recipient': sender})
+                    unique_senders.append(sender)
+                    unique_contact.append(contact)
+        elif user.role == models.User.STUDENT:
+            unique_contact = []
+            for email in unique_emails:
+                log_info(f'{email = }')
+                contact = email['contact']
+                if contact not in unique_contact:
+                    unique_combinations.append({'sender': user.id, 'recipient': contact})
+                    unique_contact.append(contact)
+        log_info(f'{unique_combinations = }')
+        return JsonResponse(unique_combinations, safe=False)
+

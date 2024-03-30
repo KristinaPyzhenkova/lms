@@ -3,6 +3,7 @@ import re
 from django.db.models import Count, F, ExpressionWrapper, FloatField, Q
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
+from collections import defaultdict
 
 from lms import models, const
 from lms.helpers import log_info, handle_exceptions
@@ -153,7 +154,7 @@ class ListCommunicationSerializer(serializers.ModelSerializer):
         sender = models.User.objects.get(pk=pk)
         recipient = self.context['request'].user
         return models.Communication.objects.filter(sender=sender, recipient=recipient, is_read=False).count()
-    
+
 
 class ListUserCommunicationSerializer(serializers.ModelSerializer):
 
@@ -210,8 +211,9 @@ class LectureWithUserSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         course_id = self.context['course_id']
-        course = instance.course.filter(pk=course_id).first()
+        course = instance.user_course.filter(course_id=course_id).first()
         if course:
+            course = course.course
             lectures = course.lecture_course.all()
             serialized_lectures = GetLectureSerializer(
                 lectures,
@@ -292,12 +294,14 @@ class TaskSolutionSerializer(serializers.ModelSerializer):
         student = validated_data.pop('student')
         try:
             task_solution = models.TaskSolution.objects.get(task=task, student=student)
+            log_info(f'{task_solution = }')
         except models.TaskSolution.DoesNotExist:
             task_solution = models.TaskSolution.objects.create(
                 task=task,
                 student=student,
                 **validated_data
             )
+            log_info(f'{task_solution = }')
         return task_solution
 
 class ManagerStudentSerializer(serializers.ModelSerializer):
@@ -372,3 +376,97 @@ class UploadedFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.UploadedFile
         fields = ['id', 'file', 'owner']
+
+
+class SettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.Settings
+        fields = '__all__'
+    
+    def save(self, **kwargs):
+        instance = super().save(**kwargs)
+        image = self.validated_data.get('image', None)
+        if image:
+            instance.image.save(image.name, image, save=True)
+        return instance
+
+
+class EmailSerializer(serializers.ModelSerializer):
+    sender = serializers.PrimaryKeyRelatedField(
+        queryset=models.User.objects.all(),
+        source='sent_emails',
+        write_only=True
+    )
+    recipient = serializers.PrimaryKeyRelatedField(
+        queryset=models.User.objects.all(),
+        source='received_emails',
+        write_only=True
+    )
+    contact = serializers.PrimaryKeyRelatedField(
+        queryset=models.Contacts.objects.all(),
+        source='contact_emails',
+        write_only=True,
+    )
+    
+
+    class Meta:
+        model = models.Email
+        fields = ['id', 'sender', 'recipient', 'contact', 'message', 'is_read', 'reading_time']
+
+    def create(self, validated_data):
+        sender = validated_data.pop('sent_emails')
+        recipient = validated_data.pop('received_emails')
+        message = validated_data.pop('message')
+        contact = validated_data.pop('contact_emails')
+        communication = models.Email.objects.create(
+            sender=sender,
+            recipient=recipient,
+            contact=contact,
+            message=message,
+            **validated_data
+        )
+        return communication
+
+
+class NestedEmailSerializer(serializers.ModelSerializer):
+    sender_email = serializers.SerializerMethodField()
+    recipient_email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.Email
+        fields = ['id', 'sender_email', 'recipient_email', 'message', 'is_read', 'reading_time']
+    
+    def get_sender_email(self, obj):
+        if obj.sender.role == models.User.MENTOR and obj.contact:
+            return obj.contact.email
+        return obj.sender.email
+    
+    def get_recipient_email(self, obj):
+        if obj.recipient.role == models.User.MENTOR and obj.contact:
+            return obj.contact.email
+        return obj.recipient.email
+
+
+class ListEmailSerializer(serializers.ModelSerializer):
+    email = NestedEmailSerializer(source='*', many=True, read_only=True)
+    new_msg = serializers.SerializerMethodField()
+
+    class Meta:
+        model = models.Email
+        fields = ['email', 'new_msg']
+
+    def get_new_msg(self, instance):
+        return instance.filter(is_read=False, recipient=self.context['request'].user).count()
+
+
+class ListEmailContactSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = models.Contacts
+        fields = ['id', 'email']
+
+class ListEmailStudentsSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = models.User
+        fields = ['id', 'email']

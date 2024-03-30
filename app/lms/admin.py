@@ -110,6 +110,23 @@ class CommunicationAdmin(admin.ModelAdmin):
     ordering = ('-id',)
 
 
+@admin.register(models.Email)
+class EmailAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'sender',
+        'recipient',
+        'contact',
+        'message',
+        'is_read',
+        'reading_time',
+        'created'
+    )
+    search_fields = ('sender__email', 'recipient__email', 'contact__email')
+    empty_value_display = '-пусто-'
+    ordering = ('-id',)
+
+
 @admin.register(models.Lecture)
 class LectureAdmin(admin.ModelAdmin):
     list_display = (
@@ -189,4 +206,17 @@ class UploadedFileAdmin(admin.ModelAdmin):
         'file',
         'owner',
         'created',
+    )
+
+
+@admin.register(models.Settings)
+class SettingsAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'name',
+        'description',
+        'is_flag',
+        'num',
+        'float_field',
+        'content'
     )

@@ -10,6 +10,8 @@ router.register('user', views.UserViewSet, basename='user')
 router.register('message', views.CommunicationViewSet, basename='message')
 router.register('course', views.CourseViewSet, basename='course')
 router.register('file', views.UploadedFileViewSet, basename='file')
+router.register('settings', views.SettingsViewSet, basename='settings')
+router.register('email', views.EmailViewSet, basename='email')
 
 
 urlpatterns = [

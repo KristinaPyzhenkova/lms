@@ -328,3 +328,42 @@ class Contacts(CommonFields):
 
     def __str__(self):
         return str(self.id)
+
+
+class Settings(CommonFields):
+    name = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+    )
+    description = models.TextField(blank=True, null=True)
+    is_flag = models.BooleanField(default=False)
+    num = models.IntegerField(default=0)
+    float_field = models.FloatField(default=0)
+    content = models.JSONField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-id']
+        verbose_name = 'Настройки'
+        verbose_name_plural = 'Настройки'
+
+    def __str__(self):
+        return str(self.id)
+
+
+class Email(CommonFields):
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_emails', verbose_name=_('Sender'))
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_emails', verbose_name=_('Recipient'))
+    contact = models.ForeignKey(Contacts, on_delete=models.SET_NULL, related_name='contact_emails', null=True, blank=True, verbose_name=_('Contact'))
+    message = models.TextField(verbose_name=_('Message'))
+    is_read = models.BooleanField(default=False)
+    reading_time = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = _('Email')
+        verbose_name_plural = _('Emails')
+        ordering = ['-id']
+
+    def __str__(self):
+        # return f"From: {self.contact.email}, To: {self.recipient.email}"
+        return f"From: {self.sender.id}, To: {self.recipient.id}"
