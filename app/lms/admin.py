@@ -28,7 +28,6 @@ class CourseAdminForm(forms.ModelForm):
             )
 
     def save(self, commit=True):
-        print(f'{commit = }')
         user_instance = super().save(commit=False)
         user_instance.save()
         courses = self.cleaned_data.get('course')

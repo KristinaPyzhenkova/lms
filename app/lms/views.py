@@ -31,7 +31,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from lms import serializers, models, const
+from lms import serializers, models, const, email
 from lms.helpers import handle_exceptions, generate_password, log_info
 from lms.permissions import IsMentor, CanView
 
@@ -150,6 +150,11 @@ class UserViewSet(viewsets.ViewSet):
                     description='zip_val',
                     example=1234
                 ),
+                'course': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='course',
+                    example=1
+                ),
             },
             required=['email_personal', 'first_name', 'last_name']
         ),
@@ -165,7 +170,12 @@ class UserViewSet(viewsets.ViewSet):
     def create(self, request):
         """Регистрация."""
         user_data = request.data
+        course = user_data.pop('course')
+        course = models.Course.objects.filter(id=course).first()
+        if not course:
+            return Response({'error': 'Такого курса нет.'}, status=status.HTTP_400_BAD_REQUEST)
         user_data['email'] = const.template_email.format(user_data['first_name'], user_data['last_name'])
+        log_info(f"{user_data['email'] = }")
         user_data['password'] = generate_password()
         log_info(f"{user_data['password'] = } {user_data['email'] = }")
         serializer = serializers.NewUserSerializer(
@@ -178,7 +188,8 @@ class UserViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         user = serializer.save()
-        # email_sent()
+        models.UserCourse.objects.create(user=user, course=course)
+        email.send_email(user_data['password'], user.email_personal, user.email)
         return Response(status=status.HTTP_201_CREATED)
 
     @action(
@@ -1283,28 +1294,55 @@ class SettingsViewSet(viewsets.ModelViewSet):
         required=[]
     )
     def create(self, request, *args, **kwargs):
-        image = request.data.pop('image')
+        settings_data = request.data.dict()
+        image = settings_data.pop('image', None)
         if image:
-            settings_data = request.data.dict()
             media_root = settings.MEDIA_ROOT
-            image_path = os.path.join(media_root, 'settings', image[0].name)
+            image_path = os.path.join(media_root, 'settings', image.name)
             with open(image_path, 'wb') as f:
-                f.write(image[0].read())
-            settings_data['content'] = image_path
-            serializer = self.get_serializer(data=settings_data)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+                f.write(image.read())
+            if 'content' in settings_data:
+                content_dict = json.loads(settings_data['content'])
+                content_dict['image_path'] = image_path
+                settings_data['content'] = content_dict
+            else:
+                settings_data['content'] = {'image_path': image_path}
         else:
-            return super().create(request, *args, **kwargs)
+            content_dict = json.loads(settings_data['content'])
+            settings_data['content'] = content_dict
+        log_info(f'{settings_data = }')
+        serializer = self.get_serializer(data=settings_data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        log_info(f'{instance.content = }')
-        if settings.MEDIA_ROOT in instance.content:
-            return FileResponse(open(instance.content, 'rb'), as_attachment=True)
+        if "image_path" in instance.content and settings.MEDIA_ROOT in instance.content["image_path"]:
+            return FileResponse(open(instance.content["image_path"], 'rb'), as_attachment=True) 
         else:
             return super().retrieve(request, *args, **kwargs)
+
+    @action(
+        detail=True,
+        methods=['GET'],
+        permission_classes=[IsAuthenticated],
+        url_path='image_path'
+    )
+    def retrieve_image_path(self, request, pk=None):
+        queryset = models.Settings.objects.filter(id=pk).first()
+        if not queryset:
+            return Response({'message': 'Файл не найден'}, status=404)
+        log_info(f'{queryset = }')
+        log_info(f'{queryset.content = }')
+        log_info(f'{queryset.content["image_path"] = }')
+        image_path = queryset.content["image_path"]
+        if os.path.exists(image_path):
+            with open(image_path, 'rb') as file:
+                image_data = file.read()
+            return HttpResponse(image_data, content_type='image/png')
+        else:
+            return HttpResponse(status=404)
 
 
 @permission_classes([IsAuthenticated, ])
@@ -1500,3 +1538,37 @@ class EmailViewSet(viewsets.ViewSet):
         log_info(f'{unique_combinations = }')
         return JsonResponse(unique_combinations, safe=False)
 
+    @action(
+        detail=False,
+        methods=['GET'],
+        url_path='list_msgs/(?P<type_msg>[0-1]+)',
+        permission_classes=[IsAuthenticated]
+    )
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description='HTTP_200_OK',
+                schema=serializers.ListUserCommunicationSerializer(),
+            ),
+            401: openapi.Response(
+                description='Authentication credentials were not provided.',
+            )
+        }
+    )
+    def view_list_msgs(self, request, type_msg):
+        """
+        Список полученных и отправленных сообщений.
+        0 - отправленных
+        1 - полученных
+        """
+        user = self.request.user
+        if int(type_msg) == 1:
+            emails = models.Email.objects.filter(
+                Q(recipient=user)
+            )
+        else:
+            emails = models.Email.objects.filter(
+                Q(sender=user)
+            )
+        sent_serializer = serializers.NestedEmailSerializer(emails, many=True)
+        return Response(sent_serializer.data, status=status.HTTP_200_OK)
