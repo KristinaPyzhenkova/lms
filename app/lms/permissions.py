@@ -24,6 +24,8 @@ class CanView(permissions.BasePermission):
         contact_id = view.kwargs.get('pk')
         if contact_id:
             contact = models.Contacts.objects.get(pk=contact_id)
+            if user.role == model.User.ADMIN:
+                return True
             if user.role == models.User.MENTOR and user.course.filter(id=contact.course.id).exists():
                 return True
             if user.role == models.User.STUDENT and user.course.filter(id=contact.course.id).exists():
@@ -35,4 +37,4 @@ class IsMentor(permissions.BasePermission):
         if not request.user.is_authenticated:
             return False
         user = request.user
-        return user.role == models.User.MENTOR
+        return user.role in [models.User.MENTOR, models.User.ADMIN]

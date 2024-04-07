@@ -12,6 +12,9 @@ router.register('course', views.CourseViewSet, basename='course')
 router.register('file', views.UploadedFileViewSet, basename='file')
 router.register('settings', views.SettingsViewSet, basename='settings')
 router.register('email', views.EmailViewSet, basename='email')
+router.register('template', views.TemplateViewSet, basename='template')
+router.register('emailsmtp', views.EmailSMTPViewSet, basename='emailsmtp')
+router.register('mailbox', views.MailboxViewSet, basename='mailbox')
 
 
 urlpatterns = [

@@ -73,9 +73,11 @@ class Course(CommonFields):
 class User(AbstractUser, CommonFields):
     STUDENT = 'Студент'
     MENTOR = 'Наставник'
+    ADMIN = 'Админ'
     ROLE = (
         (STUDENT, STUDENT),
         (MENTOR, MENTOR),
+        (ADMIN, ADMIN),
     )
     id = models.BigAutoField(primary_key=True)
     email = models.EmailField(
@@ -356,6 +358,7 @@ class Email(CommonFields):
     recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_emails', verbose_name=_('Recipient'))
     contact = models.ForeignKey(Contacts, on_delete=models.SET_NULL, related_name='contact_emails', null=True, blank=True, verbose_name=_('Contact'))
     message = models.TextField(verbose_name=_('Message'))
+    theme = models.CharField(max_length=25, verbose_name=_('theme'))
     is_read = models.BooleanField(default=False)
     reading_time = models.DateTimeField(null=True, blank=True)
 
@@ -367,3 +370,38 @@ class Email(CommonFields):
     def __str__(self):
         # return f"From: {self.contact.email}, To: {self.recipient.email}"
         return f"From: {self.sender.id}, To: {self.recipient.id}"
+
+
+class Template(models.Model):
+    name = models.CharField(max_length=100)
+    text = models.TextField()
+
+    def __str__(self):
+        return self.name
+
+
+class Mailbox(models.Model):
+    PROVIDER_CHOICES = (
+        ('google', 'google'),
+        ('webmail', 'webmail'),
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
+    email = models.EmailField()
+    password = models.CharField(max_length=255)
+    courses = models.ManyToManyField(Course, related_name='mailboxes')
+
+    def __str__(self):
+        return f"{self.provider} ({self.email})"
+
+
+class EmailSMTP(CommonFields):
+    sender = models.EmailField()
+    recipient = models.EmailField()
+    subject = models.CharField(max_length=255)
+    body = models.TextField()
+    sent_at = models.DateTimeField(auto_now_add=True)
+    mailbox = models.ForeignKey(Mailbox, on_delete=models.CASCADE, related_name='emailsmtp')
+    id_inbox = models.CharField(max_length=100, blank=True, null=True,)
+
+    def __str__(self):
+        return str(self.id)

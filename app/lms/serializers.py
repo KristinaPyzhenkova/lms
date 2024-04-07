@@ -409,18 +409,20 @@ class EmailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.Email
-        fields = ['id', 'sender', 'recipient', 'contact', 'message', 'is_read', 'reading_time']
+        fields = ['id', 'sender', 'recipient', 'contact', 'message', 'theme', 'is_read', 'reading_time']
 
     def create(self, validated_data):
         sender = validated_data.pop('sent_emails')
         recipient = validated_data.pop('received_emails')
         message = validated_data.pop('message')
+        theme = validated_data.pop('theme')
         contact = validated_data.pop('contact_emails')
         communication = models.Email.objects.create(
             sender=sender,
             recipient=recipient,
             contact=contact,
             message=message,
+            theme=theme,
             **validated_data
         )
         return communication
@@ -432,15 +434,15 @@ class NestedEmailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.Email
-        fields = ['id', 'sender_email', 'recipient_email', 'message', 'is_read', 'reading_time']
+        fields = ['id', 'sender_email', 'recipient_email', 'message', 'theme', 'is_read', 'reading_time']
     
     def get_sender_email(self, obj):
-        if obj.sender.role == models.User.MENTOR and obj.contact:
+        if obj.sender.role in [models.User.MENTOR, models.User.ADMIN] and obj.contact:
             return obj.contact.email
         return obj.sender.email
     
     def get_recipient_email(self, obj):
-        if obj.recipient.role == models.User.MENTOR and obj.contact:
+        if obj.recipient.role in [models.User.MENTOR, models.User.ADMIN] and obj.contact:
             return obj.contact.email
         return obj.recipient.email
 
@@ -468,3 +470,30 @@ class ListEmailStudentsSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.User
         fields = ['id', 'email']
+
+
+class TemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.Template
+        fields = ['id', 'name', 'text']
+
+
+class EmailSMTPSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.EmailSMTP
+        fields = ['id', 'sender', 'recipient', 'subject', 'body', 'sent_at', 'mailbox']
+        read_only_fields = ['sent_at']
+
+
+class MailboxSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.Mailbox
+        fields = ['id', 'provider', 'email', 'password', 'courses']
+
+    def to_representation(self, instance):
+        """
+        Переопределяем метод to_representation для получения списка курсов вместо их идентификаторов.
+        """
+        representation = super().to_representation(instance)
+        representation['courses'] = [course.name for course in instance.courses.all()]
+        return representation

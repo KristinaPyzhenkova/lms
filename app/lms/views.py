@@ -30,6 +30,7 @@ from django.http import FileResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.contrib.auth.models import AnonymousUser
 
 from lms import serializers, models, const, email
 from lms.helpers import handle_exceptions, generate_password, log_info
@@ -189,7 +190,7 @@ class UserViewSet(viewsets.ViewSet):
             )
         user = serializer.save()
         models.UserCourse.objects.create(user=user, course=course)
-        email.send_email(user_data['password'], user.email_personal, user.email)
+        email.send_email_gmail(user_data['password'], user.email_personal, user.email)
         return Response(status=status.HTTP_201_CREATED)
 
     @action(
@@ -208,6 +209,8 @@ class CommunicationViewSet(viewsets.ViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        if isinstance(user, AnonymousUser):
+            return models.Communication.objects.none()
         return models.Communication.objects.filter(Q(sender=user) | Q(recipient=user)).order_by('created')
 
     @swagger_auto_schema(
@@ -237,7 +240,10 @@ class CommunicationViewSet(viewsets.ViewSet):
         recipient_id = request.data.get('recipient')
         message = request.data.get('message')
         if not recipient_id or not message:
-            return Response({"error": "Recipient ID and message are required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Recipient ID and message are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         user_data = request.data
         user_data['sender'] = request.user.id
@@ -314,6 +320,10 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        if isinstance(user, AnonymousUser):
+            return models.Course.objects.none()
+        if self.request.user.role == models.User.ADMIN:
+            return models.Course.objects.all()
         return models.Course.objects.filter(user_course__in=user.user_course.all())
 
     @action(
@@ -377,7 +387,11 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_contacts(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
+        if (
+            request.user.role == models.User.ADMIN or 
+            (request.user.role == models.User.MENTOR and 
+            request.user.user_course.filter(course_id=course_id).exists())
+        ):
             request_data = request.data
             request_data['course'] = course_id
             serializer = serializers.ContactsSerializer(data=request_data)
@@ -395,7 +409,10 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_contact(self, request, pk):
         course_id = pk
-        if not request.user.user_course.filter(course_id=course_id).exists():
+        if (
+            request.user.role != models.User.ADMIN and 
+            not request.user.user_course.filter(course_id=course_id).exists()
+        ):
             return Response({'message': 'Контакт не найден'}, status=404)
         contacts = models.Contacts.objects.filter(course_id=course_id)
         serializer = serializers.ContactsSerializer(contacts, many=True)
@@ -455,13 +472,18 @@ class CourseViewSet(viewsets.ModelViewSet):
             )
         }
     )
-    def update_contact(self, request, contacts_id, pk=None):
+    def update_contact(self, request, contacts_id, pk=None):        
         try:
-            contact = models.Contacts.objects.get(pk=contacts_id, course__user_course__user=request.user)
+            if request.user.role == models.User.ADMIN:
+                contact = models.Contacts.objects.get(pk=contacts_id)
+            else:
+                contact = models.Contacts.objects.get(
+                    pk=contacts_id,
+                    course__user_course__user=request.user
+                )
         except models.Contacts.DoesNotExist:
             return Response({'message': 'Контакт не найден'}, status=404)
-
-        if request.user.role == models.User.MENTOR:
+        if request.user.role in [models.User.MENTOR, models.User.ADMIN]:
             request_data = request.data
             request_data['course'] = contact.course.pk
             if 'email' not in request_data:
@@ -481,11 +503,14 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def delete_contact(self, request, contacts_id):
         try:
-            contact = models.Contacts.objects.get(pk=contacts_id, user=request.user)
+            if contact and request.user.role == models.User.ADMIN:
+                contact = models.Contacts.objects.get(pk=contacts_id)
+            else:
+                contact = models.Contacts.objects.get(pk=contacts_id, user=request.user)
         except models.Contacts.DoesNotExist:
             return Response({'message': 'Контакт не найден'}, status=status.HTTP_404_NOT_FOUND)
 
-        if request.user.role == models.User.MENTOR:
+        if request.user.role in [models.User.MENTOR, models.User.ADMIN]:
             contact.delete()
             return Response({'message': 'Контакт успешно удален'}, status=status.HTTP_204_NO_CONTENT)
         return Response({'message': 'Недостаточно прав'}, status=status.HTTP_403_FORBIDDEN)
@@ -527,7 +552,11 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_lecture(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
+        if (
+            request.user.role == models.User.ADMIN or
+            (request.user.role == models.User.MENTOR and 
+            request.user.user_course.filter(course_id=course_id).exists())
+        ):
             request_data = request.data
             request_data['course'] = course_id
             content = request_data['content'].replace("'", '"')
@@ -547,7 +576,10 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_lectures(self, request, pk):
         course_id = pk
-        if not request.user.user_course.filter(course_id=course_id).exists():
+        if (
+            request.user.role != models.User.ADMIN and 
+            not request.user.user_course.filter(course_id=course_id).exists()
+        ):
             return Response({'message': 'Лекция не найдена'}, status=404)
         lectures = models.Lecture.objects.filter(course_id=course_id)
         serializer = serializers.GetLectureSerializer(
@@ -565,10 +597,18 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_lectures_completed(self, request, pk):
         course_id = pk
-        log_info(f'{course_id = } {request.user = }')
-        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
-            students_on_course = models.User.objects.filter(user_course__course_id=course_id, role=models.User.STUDENT)
-            log_info(f'{students_on_course = }')
+        if (
+            request.user.role == models.User.ADMIN or 
+            (request.user.role == models.User.MENTOR and 
+            request.user.user_course.filter(course_id=course_id).exists())
+        ):
+            if request.user.role == models.User.ADMIN:
+                students_on_course = models.User.objects.all(role=models.User.STUDENT)
+            else:
+                students_on_course = models.User.objects.filter(
+                    user_course__course_id=course_id,
+                    role=models.User.STUDENT
+                )
             serializer = serializers.LectureWithUserSerializer(
                 students_on_course,
                 context={'course_id': course_id},
@@ -587,10 +627,16 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_lecture_id(self, request, lecture_id):
         try:
-            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course__user=request.user)
+            if request.user.role == models.User.ADMIN:
+                lecture = models.Lecture.objects.get(pk=lecture_id)
+            else:
+                lecture = models.Lecture.objects.get(
+                    pk=lecture_id,
+                    course__user_course__user=request.user
+                )
         except models.Lecture.DoesNotExist:
             return Response({'message': 'Лекция не найдена'}, status=404)
-        if request.user.role == models.User.MENTOR:
+        if request.user.role in [models.User.MENTOR, models.User.ADMIN]:
             serializer = serializers.LectureSerializer(lecture)
             return Response(serializer.data)
         else:
@@ -637,10 +683,18 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def update_lecture(self, request, lecture_id):
         try:
-            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course__user=request.user)
+            if request.user.role == models.User.ADMIN:
+                lecture = models.Lecture.objects.get(
+                    pk=lecture_id
+                )
+            else:
+                lecture = models.Lecture.objects.get(
+                    pk=lecture_id,
+                    course__user_course__user=request.user
+                )
         except models.Lecture.DoesNotExist:
             return Response({'message': 'Лекция не найдена'}, status=404)
-        if request.user.role == models.User.MENTOR:
+        if request.user.role in [models.User.MENTOR, models.User.ADMIN]:
             request_data = request.data
             request_data['course'] = lecture.course.pk
             if 'content' in request_data:
@@ -662,11 +716,19 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def delete_lecture(self, request, lecture_id):
         try:
-            lecture = models.Lecture.objects.get(pk=lecture_id, course__user_course__user=request.user)
+            if request.user.role == models.User.ADMIN:
+                lecture = models.Lecture.objects.get(
+                    pk=lecture_id
+                )
+            else:
+                lecture = models.Lecture.objects.get(
+                    pk=lecture_id,
+                    course__user_course__user=request.user
+                )
         except models.Lecture.DoesNotExist:
             return Response({'message': 'Лекция не найдена'}, status=404)
 
-        if request.user.role == models.User.MENTOR:
+        if request.user.role in [models.User.MENTOR, models.User.ADMIN]:
             lecture.delete()
             return Response({'message': 'Лекция успешно удалена'}, status=status.HTTP_204_NO_CONTENT)
         return Response({'message': 'Недостаточно прав'}, status=status.HTTP_403_FORBIDDEN)
@@ -718,7 +780,11 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def create_tasks(self, request, pk):
         course_id = pk
-        if request.user.role == models.User.MENTOR and request.user.user_course.filter(course_id=course_id).exists():
+        if (
+            request.user.role == models.User.ADMIN or
+            (request.user.role == models.User.MENTOR and 
+            request.user.user_course.filter(course_id=course_id).exists())
+        ):
             lecture = models.Lecture.objects.filter(course_id=course_id)
             if not lecture.exists():
                 return Response({'message': 'Недостаточно прав'}, status=403) 
@@ -726,7 +792,10 @@ class CourseViewSet(viewsets.ModelViewSet):
             request_data['course'] = course_id
             text = request_data['text'].replace("'", '"')
             request_data['text'] = json.loads(text)
-            serializer = serializers.TaskSerializer(data=request_data, context={'request': request})
+            serializer = serializers.TaskSerializer(
+                data=request_data,
+                context={'request': request}
+            )
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data, status=201)
@@ -741,7 +810,12 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_tasks_lecture_id(self, request, lecture_id, type_id):
         type_task = 'question' if int(type_id) == 1 else 'task'
-        if not request.user.user_course.filter(course__lecture_course=lecture_id).exists():
+        if (
+            request.user.role != models.User.ADMIN and 
+            not request.user.user_course.filter(
+                course__lecture_course=lecture_id
+            ).exists()
+        ):
             return Response({'message': 'Лекция не найден'}, status=404)
         tasks = models.Task.objects.filter(lecture_id=lecture_id, type_task=type_task)
         serializer = serializers.TaskSerializer(tasks, many=True, context={'request': request})
@@ -755,7 +829,10 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_tasks(self, request, pk, type_id):
         type_task = 'question' if int(type_id) == 1 else 'task'
-        if not request.user.user_course.filter(course_id=pk).exists():
+        if (
+            request.user.role != models.User.ADMIN and 
+            not request.user.user_course.filter(course_id=pk).exists()
+        ):
             return Response({'message': 'Курс не найден'}, status=404)
         tasks = models.Task.objects.filter(course_id=pk, type_task=type_task)
         serializer = serializers.ListTaskSerializer([tasks], many=True, context={'request': request, 'pk': pk})
@@ -769,7 +846,10 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def get_task_solution(self, request, pk, type_id):
         type_task = 'question' if int(type_id) == 1 else 'task'
-        if not request.user.user_course.filter(course_id=pk).exists():
+        if (
+            request.user.role != models.User.ADMIN and 
+            not request.user.user_course.filter(course_id=pk).exists()
+        ):
             return Response({'message': 'Курс не найден'}, status=404)
         tasks = models.Task.objects.filter(course_id=pk, type_task=type_task)
         tasks = models.TaskSolution.objects.filter(task__in=tasks)
@@ -784,7 +864,10 @@ class CourseViewSet(viewsets.ModelViewSet):
         permission_classes=[IsAuthenticated]
     )
     def get_lecture_solution(self, request, pk):
-        if not request.user.user_course.filter(course_id=pk).exists():
+        if (
+            request.user.role != models.User.ADMIN and 
+            not request.user.user_course.filter(course_id=pk).exists()
+        ):
             return Response({'message': 'Курс не найден'}, status=404)
         lecture = models.LectureCompletion.objects.filter(lecture__course=pk)
         solved_lecture = [lc for lc in lecture if lc.calculate_completion]
@@ -829,12 +912,10 @@ class CourseViewSet(viewsets.ModelViewSet):
         request_data = request.data
         answer = request_data.pop('answer')
         if request.user.role == models.User.STUDENT:
-        # if True:
             try:
                 task = models.Task.objects.get(id=request_data['task'], course__user_course__user=request.user)
             except models.Task.DoesNotExist:
                 returnResponse({'message': 'Задача не найдена'}, status=404)
-            # log_info(f'{task.text["answers"][str(answer)]["is_correct"] = }')
             if task.type_task == 'question' and not task.text["answers"][str(answer)]["is_correct"]:
                 return Response({'message': 'Задача решена не верно'}, status=404)
             
@@ -978,18 +1059,24 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def update_task(self, request, task_id):
         try:
-            task = models.Task.objects.get(pk=task_id, course__user_course__user=request.user)
+            if request.user.role == models.User.ADMIN:
+                task = models.Task.objects.get(
+                    pk=task_id
+                )
+            else: 
+                task = models.Task.objects.get(
+                    pk=task_id, course__user_course__user=request.user
+                )
         except models.Task.DoesNotExist:
             return Response({'message': 'Задача не найден'}, status=404)
 
-        if request.user.role == models.User.MENTOR:
+        if request.user.role in [models.User.MENTOR, models.User.ADMIN]:
             request_data = request.data
             request_data['course'] = task.course.pk
             request_data['lecture'] = task.lecture_id
             if 'text' in request_data:
                 text = request_data['text'].replace("'", '"')
                 request_data['text'] = json.loads(text)
-            log_info(f'{request_data = }')
             serializer = serializers.TaskSerializer(task, data=request_data, context={'request': request})
             if serializer.is_valid():
                 serializer.save()
@@ -1005,11 +1092,19 @@ class CourseViewSet(viewsets.ModelViewSet):
     )
     def delete_task(self, request, task_id):
         try:
-            task = models.Task.objects.get(pk=task_id, course__user_course__user=request.user)
+            if request.user.role == models.User.ADMIN:
+                task = models.Task.objects.get(
+                    pk=task_id
+                )
+            else: 
+                task = models.Task.objects.get(
+                    pk=task_id,
+                    course__user_course__user=request.user
+                )
         except models.Task.DoesNotExist:
             return Response({'message': 'Задача не найдена'}, status=404)
 
-        if request.user.role == models.User.MENTOR:
+        if request.user.role in [models.User.MENTOR, models.User.ADMIN]:
             task.delete()
             return Response({'message': 'Задача успешно удалена'}, status=status.HTTP_204_NO_CONTENT)
         return Response({'message': 'Недостаточно прав'}, status=status.HTTP_403_FORBIDDEN)
@@ -1039,14 +1134,18 @@ class ManagerStudentsView(APIView):
         course_id = request.query_params.get('course_id')
         trash_flag = request.query_params.get('trash_flag')
         user = request.user
-        courses = models.Course.objects.filter(user_course__in=user.user_course.all())
+        if request.user.role == models.User.ADMIN:
+            courses = models.Course.objects.all()
+        else:
+            courses = models.Course.objects.filter(
+                user_course__in=user.user_course.all()
+            )
         if course_id:
             courses = courses.filter(id=int(course_id))
         students_with_courses = []
         for course in courses:
             students_on_course = course.user_course.filter(user__role=models.User.STUDENT)
             for student in students_on_course:
-                log_info(f'{trash_flag = }')
                 if trash_flag is not None and student.trash_flag != int(trash_flag):
                     continue
                 students_with_courses.append((student.user, course))
@@ -1075,17 +1174,18 @@ class ManagerStudentsView(APIView):
     )
     def put(self, request):
         user = self.request.user
-        if user.role != models.User.MENTOR:
+        if user.role == models.User.STUDENT:
             return Response({'message': 'Недостаточно прав'}, status=404)
-        all_courses = models.Course.objects.filter(user_course__in=user.user_course.all())
+        elif user.role == models.User.MENTOR:
+            all_courses = models.Course.objects.filter(user_course__in=user.user_course.all())
+        elif user.role == models.User.ADMIN:
+            all_courses = models.Course.objects.all()
         data = request.data.get('data')
         if not data:
             return Response({"error": "No data provided."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
-                log_info(f'{data = }')
                 for entry in data:
-                    log_info(f'{entry = }')
                     course_id = entry.get('course_id')
                     student_id = entry.get('student_id')
                     trash_flag = entry.get('trash_flag')
@@ -1120,8 +1220,17 @@ class UploadedFileViewSet(viewsets.ViewSet):
     )
     def get_upload_student(self, request, user_id):
         student = get_object_or_404(models.User, id=user_id)
-        all_courses = models.Course.objects.filter(user_course__in=student.user_course.all())
-        if request.user.role != models.User.MENTOR or not request.user.user_course.filter(course_id__in=all_courses).exists():
+        if request.user.role == models.User.ADMIN:
+            all_courses = models.Course.objects.all()
+        else:
+            all_courses = models.Course.objects.filter(
+                user_course__in=student.user_course.all()
+            )
+        if (
+            request.user.role == models.User.STUDENT or 
+            (request.user.role == models.User.MENTOR and 
+            not request.user.user_course.filter(course_id__in=all_courses).exists())
+        ):
             return Response({'message': 'Студент не относится к ментору'}, status=404)
         files = models.UploadedFile.objects.filter(owner=student)
         serializer = serializers.UploadedFileSerializer(files, many=True)
@@ -1177,9 +1286,8 @@ class UploadedFileViewSet(viewsets.ViewSet):
     )
     def create_signature(self, request):
         files = request.FILES.getlist('files')
-        log_info(f'{files = }')
         owner = request.user.pk
-        if request.user.role == models.User.MENTOR:
+        if request.user.role != models.User.STUDENT:
             return Response({'message': 'Ожидается студент.'}, status=404)
 
         # Проверяем, что количество файлов не превышает 3
@@ -1212,8 +1320,14 @@ class UploadedFileViewSet(viewsets.ViewSet):
         except models.UploadedFile.DoesNotExist:
             return Response({'message': 'Файл не найден'}, status=404)
         student = uploaded_file.owner
-        if request.user.role == models.User.MENTOR and not request.user_course.filter(course_id__in=student.course.all()).exists():
-            return Response({'message': 'Файл принадлежит студенту который не относиться к ментору'}, status=404)
+        if (
+            request.user.role == models.User.MENTOR and 
+            not request.user_course.filter(course_id__in=student.course.all()).exists()
+        ):
+            return Response(
+                {'message': 'Файл принадлежит студенту который не относиться к ментору'},
+                status=404
+            )
         if request.user.role == models.User.STUDENT and uploaded_file.owner != request.user:
             return Response({'message': 'Недостаточно прав'}, status=404)
         file_path = uploaded_file.file.path
@@ -1310,7 +1424,6 @@ class SettingsViewSet(viewsets.ModelViewSet):
         else:
             content_dict = json.loads(settings_data['content'])
             settings_data['content'] = content_dict
-        log_info(f'{settings_data = }')
         serializer = self.get_serializer(data=settings_data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -1333,9 +1446,6 @@ class SettingsViewSet(viewsets.ModelViewSet):
         queryset = models.Settings.objects.filter(id=pk).first()
         if not queryset:
             return Response({'message': 'Файл не найден'}, status=404)
-        log_info(f'{queryset = }')
-        log_info(f'{queryset.content = }')
-        log_info(f'{queryset.content["image_path"] = }')
         image_path = queryset.content["image_path"]
         if os.path.exists(image_path):
             with open(image_path, 'rb') as file:
@@ -1350,6 +1460,8 @@ class EmailViewSet(viewsets.ViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        if isinstance(user, AnonymousUser):
+            return models.Email.objects.none()
         return models.Email.objects.filter(Q(sender=user) | Q(recipient=user)).order_by('created')
 
     @swagger_auto_schema(
@@ -1371,8 +1483,13 @@ class EmailViewSet(viewsets.ViewSet):
                     description='message',
                     example='Hello!'
                 ),
+                'theme': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='theme',
+                    example='theme'
+                ),
             },
-            required=['message', 'contact']
+            required=['message', 'contact', 'theme']
         ),
         responses={
             201: openapi.Response(
@@ -1386,17 +1503,26 @@ class EmailViewSet(viewsets.ViewSet):
         contact = models.Contacts.objects.filter(pk=request.data.get('contact')).first()
         if not contact:
             return Response({"error": "contact does not exist."}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.STUDENT:
+        if request.user.role == models.User.STUDENT:
             request.data['recipient'] = contact.user.id
         recipient_id = request.data.get('recipient')
         message = request.data.get('message')
         if not recipient_id or not message:
-            return Response({"error": "Recipient ID and message are required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "Recipient ID and message are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         course = contact.course
-        if (not course.user_course.filter(user=request.user).exists() or 
-            not course.user_course.filter(user_id=recipient_id).exists()):
-            return Response({"error": "contact do not belong current users."}, status=status.HTTP_400_BAD_REQUEST)                        
+        if (
+            request.user.role != models.User.ADMIN or
+            not course.user_course.filter(user=request.user).exists() or 
+            not course.user_course.filter(user_id=recipient_id).exists()
+        ):
+            return Response(
+                {"error": "contact do not belong current users."},
+                status=status.HTTP_400_BAD_REQUEST
+            )                        
         serializer = serializers.EmailSerializer(data=user_data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
@@ -1423,7 +1549,10 @@ class EmailViewSet(viewsets.ViewSet):
     def view(self, request, pk, contacts_id):
         """Просмотр переписки."""
         if request.user.id == int(pk):
-            return Response({"error": "you can't receive correspondence with you."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "you can't receive correspondence with you."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         emails = self.get_queryset().filter(
             (Q(sender=pk) | Q(recipient=pk)) & Q(contact=contacts_id)
         ).order_by('created')
@@ -1459,7 +1588,10 @@ class EmailViewSet(viewsets.ViewSet):
     def view_contacts(self, request):
         """Просмотр имейл контактов для юзера."""
         user = self.request.user
-        courses_queryset = models.Course.objects.filter(user_course__in=user.user_course.all())
+        if request.user.role == models.User.ADMIN:
+            courses_queryset = models.Course.objects.all()
+        else:
+            courses_queryset = models.Course.objects.filter(user_course__in=user.user_course.all())
         unique_contacts = models.Contacts.objects.filter(course__in=courses_queryset).distinct()
         sent_serializer = serializers.ListEmailContactSerializer(unique_contacts, many=True)
         return Response(sent_serializer.data, status=status.HTTP_200_OK)
@@ -1484,8 +1616,16 @@ class EmailViewSet(viewsets.ViewSet):
     def view_recipient(self, request):
         """Просмотр имейл recipient для ментора."""
         user = self.request.user
-        courses_queryset = models.Course.objects.filter(user_course__in=user.user_course.all())
-        students = models.User.objects.filter(user_course__course__in=courses_queryset, role=models.User.STUDENT).distinct()
+        if request.user.role == models.User.ADMIN:
+            courses_queryset = models.Course.objects.all()
+        else:
+            courses_queryset = models.Course.objects.filter(
+                user_course__in=user.user_course.all()
+            )
+        students = models.User.objects.filter(
+            user_course__course__in=courses_queryset,
+            role=models.User.STUDENT
+        ).distinct()
         sent_serializer = serializers.ListEmailStudentsSerializer(students, many=True)
         return Response(sent_serializer.data, status=status.HTTP_200_OK)
     
@@ -1535,6 +1675,10 @@ class EmailViewSet(viewsets.ViewSet):
                 if contact not in unique_contact:
                     unique_combinations.append({'sender': user.id, 'recipient': contact})
                     unique_contact.append(contact)
+        else:
+            return Response(
+                {"error": "Нет прав."}, status=status.HTTP_400_BAD_REQUEST
+            ) 
         log_info(f'{unique_combinations = }')
         return JsonResponse(unique_combinations, safe=False)
 
@@ -1572,3 +1716,182 @@ class EmailViewSet(viewsets.ViewSet):
             )
         sent_serializer = serializers.NestedEmailSerializer(emails, many=True)
         return Response(sent_serializer.data, status=status.HTTP_200_OK)
+
+
+class TemplateViewSet(viewsets.ModelViewSet):
+    queryset = models.Template.objects.all()
+    serializer_class = serializers.TemplateSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+
+class EmailSMTPViewSet(viewsets.ViewSet):
+    queryset = models.EmailSMTP.objects.all()
+    serializer_class = serializers.EmailSMTPSerializer
+
+    @action(detail=False, methods=['post'], permission_classes=[IsMentor])
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'mailbox_id': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='ID of the mailbox',
+                    example=1
+                ),
+                'recipient_email': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Email address of the recipient',
+                    example='recipient@example.com'
+                ),
+                'subject': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Subject of the email',
+                    example='Hello!'
+                ),
+                'body': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Body of the email',
+                    example='This is a test email.'
+                ),
+            },
+            required=['mailbox_id', 'recipient_email', 'subject', 'body']
+        ),
+        responses={
+            201: openapi.Response(
+                description='Email successfully sent',
+            ),
+            404: "Mailbox not found or method for sending message not found"
+        },
+    )
+    def create_email(self, request):
+        mailbox_id = request.data.get('mailbox_id')
+        recipient_email = request.data.get('recipient_email')
+        subject = request.data.get('subject')
+        body = request.data.get('body')
+
+        try:
+            mailbox = models.Mailbox.objects.get(pk=mailbox_id)
+        except models.Mailbox.DoesNotExist:
+            return Response({'message': 'Mailbox не найден'}, status=404)
+        if (
+            request.user.role != models.User.ADMIN and 
+            not mailbox.courses.filter(user_course__user=request.user).exists()
+        ):
+            return Response({'message': 'Пользователь не связан с этим курсом'}, status=403)
+        if mailbox.provider == 'webmail':
+            email.send_email_webmail(body, subject, recipient_email, mailbox)
+        else:
+            return Response({'message': 'Метод для отправки сообщения не найден'}, status=404)
+        email_data = {
+            'sender': mailbox.email,
+            'recipient': recipient_email,
+            'subject': subject,
+            'body': body,
+            'mailbox': mailbox.pk
+        }
+
+        serializer = serializers.EmailSMTPSerializer(data=email_data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], permission_classes=[IsMentor])
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'mailbox_id': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='ID of the mailbox',
+                    example=1
+                ),
+            },
+            required=['mailbox_id']
+        ),
+        responses={
+            204: openapi.Response(
+                description='Email parsing updated successfully',
+            ),
+            404: "Mailbox not found"
+        },
+    )
+    def update_email_parsing(self, request):
+        mailbox_id = request.data.get('mailbox_id')
+        try:
+            mailbox = models.Mailbox.objects.get(pk=mailbox_id)
+        except models.Mailbox.DoesNotExist:
+            return Response({'message': 'Mailbox не найден'}, status=404)
+        if (
+            request.user.role != models.User.ADMIN and 
+            not mailbox.courses.filter(user_course__user=request.user).exists()
+        ):
+            return Response({'message': 'Пользователь не связан с этим курсом'}, status=403)
+
+        email_msg = models.EmailSMTP.objects.filter(recipient=mailbox.email, mailbox=mailbox).last()
+        log_info(f'{email_msg = }')
+        if not email_msg:
+            last_num = 0
+        else:
+            last_num = int(email_msg.id_inbox)   
+        email.parsing_webmail(mailbox, last_num)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class MailboxViewSet(viewsets.ViewSet):
+    queryset = models.Mailbox.objects.all()
+    serializer_class = serializers.MailboxSerializer
+
+    @action(detail=False, methods=['get'], permission_classes=[IsMentor])
+    def get_mentor_mailboxes(self, request):
+        user = self.request.user
+        mentor_mailboxes = self.queryset.filter(courses__user_course__in=user.user_course.all()).distinct()
+        serializer = self.serializer_class(mentor_mailboxes, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsMentor])
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                name='mailbox_id',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_INTEGER,
+                description='ID of the mailbox',
+                required=True
+            ),
+            openapi.Parameter(
+                name='email_type',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description='Type of emails to retrieve (in/out)',
+                required=True
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description='List of emails retrieved successfully',
+            ),
+            400: "Invalid email type"
+        },
+    )
+    def get_emails(self, request):
+        mailbox_id = request.query_params.get('mailbox_id')
+        email_type = request.query_params.get('email_type')  # Входящие/исходящие
+        try:
+            mailbox = models.Mailbox.objects.get(pk=mailbox_id)
+        except models.Mailbox.DoesNotExist:
+            return Response({'message': 'Mailbox не найден'}, status=404)
+        if (
+            request.user.role != models.User.ADMIN and 
+            not mailbox.courses.filter(user_course__user=request.user).exists()
+        ):
+            return Response({'message': 'Пользователь не связан с этим курсом'}, status=403)
+
+        if email_type == 'in':
+            emails = models.EmailSMTP.objects.filter(recipient=mailbox.email, mailbox=mailbox)
+        elif email_type == 'out':
+            emails = models.EmailSMTP.objects.filter(sender=mailbox.email, mailbox=mailbox)
+        else:
+            return Response({'error': 'Invalid email type'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = serializers.EmailSMTPSerializer(emails, many=True)
+        return Response(serializer.data)

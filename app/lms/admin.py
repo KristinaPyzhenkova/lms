@@ -116,6 +116,7 @@ class EmailAdmin(admin.ModelAdmin):
         'sender',
         'recipient',
         'contact',
+        'theme',
         'message',
         'is_read',
         'reading_time',
@@ -218,4 +219,54 @@ class SettingsAdmin(admin.ModelAdmin):
         'num',
         'float_field',
         'content'
+    )
+
+
+@admin.register(models.Template)
+class TemplateAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'name',
+        'text',
+    )
+
+
+class MailboxAdminForm(forms.ModelForm):
+    class Meta:
+        model = models.Mailbox
+        fields = '__all__'
+
+    courses = forms.ModelMultipleChoiceField(
+        queryset=models.Course.objects.all(),
+        required=False,
+        widget=FilteredSelectMultiple('Course', is_stacked=False)
+    )
+
+
+@admin.register(models.Mailbox)
+class MailboxAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'provider',
+        'email',
+        'courses_list',
+    )
+    form = MailboxAdminForm
+
+    def courses_list(self, obj):
+        return ", ".join([str(course) for course in obj.courses.all()])
+
+    courses_list.short_description = 'courses'
+
+
+@admin.register(models.EmailSMTP)
+class EmailSMTPAdmin(admin.ModelAdmin):
+    list_display = (
+        'id',
+        'sender',
+        'recipient',
+        'subject',
+        'body',
+        'sent_at',
+        'mailbox',
     )
