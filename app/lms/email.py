@@ -4,6 +4,7 @@ import base64
 
 import smtplib as smtp
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import email
 from email.header import decode_header
 import imaplib
@@ -35,7 +36,7 @@ def send_email_gmail(password_acc, email_personal, email_login):
     server.sendmail(login, email_personal, message.encode('utf-8'))
 
 
-def send_email_webmail(text_msg, topic, recipient, mailbox):
+def send_email_webmail(html_msg, topic, recipients, mailbox):
     server = smtp.SMTP_SSL('lmscreators.com', 465)
     # login_webmail = os.getenv('login_webmail')
     # password_webmail = os.getenv('password_webmail')
@@ -47,9 +48,9 @@ def send_email_webmail(text_msg, topic, recipient, mailbox):
     msg.attach(MIMEText(html_msg, 'html'))
     msg['Subject'] = topic
     msg['From'] = login_webmail
-    msg['To'] = recipient
+    msg['To'] = ", ".join(recipients)
 
-    server.sendmail(login_webmail, recipient, msg.as_string())
+    server.sendmail(login_webmail, recipients, msg.as_string())
     server.quit()
 
 

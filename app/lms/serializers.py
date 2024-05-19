@@ -469,7 +469,7 @@ class ListEmailStudentsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = models.User
-        fields = ['id', 'email']
+        fields = ['id', 'email', 'email_personal']
 
 
 class TemplateSerializer(serializers.ModelSerializer):
@@ -481,8 +481,33 @@ class TemplateSerializer(serializers.ModelSerializer):
 class EmailSMTPSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.EmailSMTP
-        fields = ['id', 'sender', 'recipient', 'subject', 'body', 'sent_at', 'mailbox']
+        fields = [
+            'id',
+            'sender',
+            'recipient',
+            'subject',
+            'body',
+            'sent_at',
+            'template',
+            'mailbox',
+            'is_read',
+            'is_answer',
+        ]
         read_only_fields = ['sent_at']
+
+
+class ListEmailSMTPSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = models.EmailSMTP
+        fields = [
+            'id',
+            'sender',
+            'recipient',
+            'subject',
+            'body',
+            'is_read',
+            'is_answer',
+        ]
 
 
 class MailboxSerializer(serializers.ModelSerializer):

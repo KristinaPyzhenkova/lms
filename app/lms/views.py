@@ -31,6 +31,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth.models import AnonymousUser
+from django.db.models import Case, Value, When, BooleanField, Max
 
 from lms import serializers, models, const, email
 from lms.helpers import handle_exceptions, generate_password, log_info
@@ -1547,7 +1548,7 @@ class EmailViewSet(viewsets.ViewSet):
         }
     )
     def view(self, request, pk, contacts_id):
-        """Просмотр переписки."""
+        """Просмотр переписки.(pk - студент, contacts_id - наставник)"""
         if request.user.id == int(pk):
             return Response(
                 {"error": "you can't receive correspondence with you."},
@@ -1728,6 +1729,22 @@ class EmailSMTPViewSet(viewsets.ViewSet):
     queryset = models.EmailSMTP.objects.all()
     serializer_class = serializers.EmailSMTPSerializer
 
+    @action(detail=True, methods=['get'], permission_classes=[IsMentor])
+    def read_email(self, request, pk):
+        user = request.user
+        mailboxes = models.Mailbox.objects.filter(
+            courses__user_course__in=user.user_course.all()
+        ).distinct()
+        email = models.EmailSMTP.objects.filter(mailbox__in=mailboxes, id=pk).first()
+        if not email:
+            return Response({'message': 'email не найден'}, status=404)
+        serializer = serializers.EmailSMTPSerializer(email)
+        if email.sender != email.mailbox.email:
+            email.is_read = True
+            email.reading_time = timezone.now()
+            email.save()
+        return Response(serializer.data)
+
     @action(detail=False, methods=['post'], permission_classes=[IsMentor])
     @swagger_auto_schema(
         request_body=openapi.Schema(
@@ -1738,10 +1755,13 @@ class EmailSMTPViewSet(viewsets.ViewSet):
                     description='ID of the mailbox',
                     example=1
                 ),
-                'recipient_email': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Email address of the recipient',
-                    example='recipient@example.com'
+                'recipients_email': openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(
+                        type=openapi.TYPE_STRING,
+                        description='Email address of the recipient',
+                        example='recipient@example.com'
+                    )
                 ),
                 'subject': openapi.Schema(
                     type=openapi.TYPE_STRING,
@@ -1753,8 +1773,13 @@ class EmailSMTPViewSet(viewsets.ViewSet):
                     description='Body of the email',
                     example='This is a test email.'
                 ),
+                'template_id': openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description='ID of the template',
+                    example=1
+                ),
             },
-            required=['mailbox_id', 'recipient_email', 'subject', 'body']
+            required=['mailbox_id', 'recipients_email', 'subject', 'body']
         ),
         responses={
             201: openapi.Response(
@@ -1765,35 +1790,48 @@ class EmailSMTPViewSet(viewsets.ViewSet):
     )
     def create_email(self, request):
         mailbox_id = request.data.get('mailbox_id')
-        recipient_email = request.data.get('recipient_email')
+        recipients_email = request.data.get('recipients_email')
         subject = request.data.get('subject')
         body = request.data.get('body')
+        template_id = request.data.get('template_id')
 
         try:
             mailbox = models.Mailbox.objects.get(pk=mailbox_id)
         except models.Mailbox.DoesNotExist:
             return Response({'message': 'Mailbox не найден'}, status=404)
+        template = None
+        if template_id:
+            try:
+                template = models.Template.objects.get(pk=template_id)
+            except models.Template.DoesNotExist:
+                return Response({'message': 'Template не найден'}, status=404)
         if (
             request.user.role != models.User.ADMIN and 
             not mailbox.courses.filter(user_course__user=request.user).exists()
         ):
             return Response({'message': 'Пользователь не связан с этим курсом'}, status=403)
         if mailbox.provider == 'webmail':
-            email.send_email_webmail(body, subject, recipient_email, mailbox)
+            email.send_email_webmail(body, subject, recipients_email, mailbox)
         else:
             return Response({'message': 'Метод для отправки сообщения не найден'}, status=404)
-        email_data = {
-            'sender': mailbox.email,
-            'recipient': recipient_email,
-            'subject': subject,
-            'body': body,
-            'mailbox': mailbox.pk
-        }
+        
+        email_data_list = []
+        for recipient_email in recipients_email:
+            email_data = {
+                'sender': mailbox.email,
+                'recipient': recipient_email,
+                'subject': subject,
+                'body': body,
+                'mailbox': mailbox.pk,
+                'template': template.pk
+            }
+            email_data_list.append(email_data)
+        serializer = serializers.EmailSMTPSerializer(data=email_data_list, many=True)
+        if serializer.is_valid():
+            serializer.save(is_read=True)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = serializers.EmailSMTPSerializer(data=email_data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'], permission_classes=[IsMentor])
     @swagger_auto_schema(
@@ -1828,7 +1866,6 @@ class EmailSMTPViewSet(viewsets.ViewSet):
             return Response({'message': 'Пользователь не связан с этим курсом'}, status=403)
 
         email_msg = models.EmailSMTP.objects.filter(recipient=mailbox.email, mailbox=mailbox).last()
-        log_info(f'{email_msg = }')
         if not email_msg:
             last_num = 0
         else:
@@ -1895,3 +1932,115 @@ class MailboxViewSet(viewsets.ViewSet):
 
         serializer = serializers.EmailSMTPSerializer(emails, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], permission_classes=[IsMentor])
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                name='email',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description='email',
+                required=True
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description='List of emails retrieved successfully',
+            ),
+            400: "Invalid email type"
+        },
+    )
+    def get_email_thread(self, request):
+        email = request.query_params.get('email')
+        email_thread = models.EmailSMTP.objects.filter(
+            Q(sender=email) | Q(recipient=email)
+        ).order_by('created')
+        serializer = serializers.EmailSMTPSerializer(email_thread, many=True)
+        return Response(serializer.data)
+    
+    
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='list_mails/(?P<is_incoming>[0-1]+)/email/(?P<email>[^/]+)',
+        permission_classes=[IsMentor]
+    )
+    @swagger_auto_schema(
+        responses={
+            200: openapi.Response(
+                description='List of emails retrieved successfully',
+            ),
+            400: "Invalid email type"
+        },
+    )
+    def list_mails(self, request, is_incoming, email):
+        user = request.user
+        mailboxes = self.queryset.filter(
+            courses__user_course__in=user.user_course.all()
+        ).distinct()
+        is_read_ordering = Case(
+            When(is_read=False, then=Value(0)),
+            default=Value(1),
+            output_field=BooleanField()
+        )
+        emails = mailboxes.values_list('email', flat=True)
+        if email not in emails:
+            return Response({'message': 'Пользователь не связан с этим email'}, status=404)
+        result = []
+        if int(is_incoming):
+            all_email = models.EmailSMTP.objects.filter(recipient=email)
+            unique_email = all_email.distinct().values_list(
+                'sender', flat=True
+            ).annotate(is_read_order=Max(is_read_ordering)).order_by('-is_read_order')
+            log_info(f'{unique_email = }')
+            for sender_email in unique_email:
+                emails = all_email.filter(sender=sender_email).annotate(
+                    is_read_order=is_read_ordering
+                ).order_by('is_read_order', '-created')
+                new_letters = emails.filter(is_read=False).count()
+                email_data = serializers.ListEmailSMTPSerializer(emails, many=True).data
+                last_template = models.EmailSMTP.objects.filter(
+                    recipient=email, sender=sender_email
+                ).exclude(Q(template=None)).order_by('-created').first()
+                result.append({
+                    'email': sender_email,
+                    'template': last_template.template.name if last_template else None,
+                    'new_letters': new_letters, 
+                    'letters': email_data,
+                })
+        else:
+            all_email = models.EmailSMTP.objects.filter(sender=email)
+            unique_email = all_email.distinct().values_list('recipient', flat=True)
+            for recipient_email in unique_email:
+                emails = all_email.filter(recipient=recipient_email).order_by('-created')
+                email_data = serializers.ListEmailSMTPSerializer(emails, many=True).data
+                last_template = models.EmailSMTP.objects.filter(
+                    recipient=recipient_email, sender=email
+                ).exclude(Q(template=None)).order_by('-created').first()
+                result.append({
+                    'email': recipient_email,
+                    'template': last_template.template.name if last_template else None,
+                    'new_letters': None, 
+                    'letters': email_data,
+                })
+        return Response(result)
+
+
+       # user = request.user
+        # mailboxes = self.queryset.filter(
+        #     courses__user_course__in=user.user_course.all()
+        # ).distinct()
+        # result = []
+        # for mailbox in mailboxes:
+        #     emails = models.EmailSMTP.objects.filter(mailbox=mailbox).order_by('-created')
+        #     new_letters = emails.filter(is_read=False, recipient=mailbox.email)
+        #     email_data = serializers.ListEmailSMTPSerializer(emails, many=True).data
+        #     result.append({
+        #         'email': mailbox.email,
+        #         'template': emails.first().template.id,
+        #         'new_letters': new_letters.count(), 
+        #         'letters': email_data,
+        #     })
+        # return Response(result)
+

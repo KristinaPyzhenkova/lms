@@ -402,6 +402,16 @@ class EmailSMTP(CommonFields):
     sent_at = models.DateTimeField(auto_now_add=True)
     mailbox = models.ForeignKey(Mailbox, on_delete=models.CASCADE, related_name='emailsmtp')
     id_inbox = models.CharField(max_length=100, blank=True, null=True,)
+    template = models.ForeignKey(
+        Template,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='emailsmtp'
+    )
+    is_read = models.BooleanField(default=False)
+    reading_time = models.DateTimeField(null=True, blank=True)
+    is_answer = models.BooleanField(default=False)
 
     def __str__(self):
         return str(self.id)
