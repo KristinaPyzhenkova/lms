@@ -228,6 +228,9 @@ class TemplateAdmin(admin.ModelAdmin):
         'id',
         'name',
         'text',
+        'subject',
+        'from_mailbox',
+        'files',
     )
 
 

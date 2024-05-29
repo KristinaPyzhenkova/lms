@@ -25,6 +25,7 @@ urlpatterns = [
     path('auth/', include('djoser.urls.jwt')),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
     path('dashboard/', views.ManagerStudentsView.as_view(), name='manager_students'),
+    path('get_file/', views.GetFileAPIView.as_view(), name='file'),
     # path('courses/<int:course_id>/contacts/', views.ContactsViewSet.as_view({'post': 'create', 'get': 'list'})),
     # path('courses/<int:course_id>/contacts/<int:pk>/', views.ContactsViewSet.as_view({'get': 'retrieve', 'put': 'update'})),
 ]

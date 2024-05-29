@@ -475,10 +475,12 @@ class ListEmailStudentsSerializer(serializers.ModelSerializer):
 class TemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Template
-        fields = ['id', 'name', 'text']
+        fields = ['id', 'name', 'text', 'subject', 'from_mailbox', 'files']
 
 
 class EmailSMTPSerializer(serializers.ModelSerializer):
+    attachments = serializers.JSONField(required=False)
+
     class Meta:
         model = models.EmailSMTP
         fields = [
@@ -492,6 +494,7 @@ class EmailSMTPSerializer(serializers.ModelSerializer):
             'mailbox',
             'is_read',
             'is_answer',
+            'attachments',
         ]
         read_only_fields = ['sent_at']
 

@@ -374,7 +374,10 @@ class Email(CommonFields):
 
 class Template(models.Model):
     name = models.CharField(max_length=100)
-    text = models.TextField()
+    text = models.TextField(blank=True)
+    subject = models.CharField(max_length=255, blank=True)
+    from_mailbox = models.ForeignKey('Mailbox', on_delete=models.CASCADE, related_name='template')
+    files = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return self.name
@@ -384,11 +387,13 @@ class Mailbox(models.Model):
     PROVIDER_CHOICES = (
         ('google', 'google'),
         ('webmail', 'webmail'),
+        ('privateemail', 'privateemail'),
     )
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
     email = models.EmailField()
     password = models.CharField(max_length=255)
     courses = models.ManyToManyField(Course, related_name='mailboxes')
+    smtp_server = models.CharField(max_length=255)
 
     def __str__(self):
         return f"{self.provider} ({self.email})"
@@ -412,6 +417,7 @@ class EmailSMTP(CommonFields):
     is_read = models.BooleanField(default=False)
     reading_time = models.DateTimeField(null=True, blank=True)
     is_answer = models.BooleanField(default=False)
+    attachments = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return str(self.id)

@@ -1722,7 +1722,85 @@ class EmailViewSet(viewsets.ViewSet):
 class TemplateViewSet(viewsets.ModelViewSet):
     queryset = models.Template.objects.all()
     serializer_class = serializers.TemplateSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes=[permissions.AllowAny]
+    parser_classes=[MultiPartParser]
+
+    @swagger_auto_schema(manual_parameters=[
+        openapi.Parameter(
+            name='files',
+            in_=openapi.IN_FORM,
+            required=False,
+            items=openapi.Items(type=openapi.TYPE_FILE),
+            type=openapi.TYPE_ARRAY,
+            description='Files to upload (maximum 10 files allowed)'
+        )
+    ])
+    def create(self, request, *args, **kwargs):
+        files = request.FILES.getlist('files')
+        if files:
+            if len(files) > 10:
+                return Response({'error': 'Cannot upload more than 10 files'}, status=status.HTTP_400_BAD_REQUEST)
+            data_files = []
+            for file in files:
+                file_path = os.path.join(settings.MEDIA_ROOT, 'template', file.name)
+                with open(file_path, 'wb') as f:
+                    for chunk in file.chunks():
+                        f.write(chunk)
+                data_files.append(file_path)
+            request.data['files'] = json.dumps(data_files)
+            log_info(f"{request.data['files'] = }")
+        return super().create(request, *args, **kwargs)
+
+    @swagger_auto_schema(manual_parameters=[
+        openapi.Parameter(
+            name='files',
+            in_=openapi.IN_FORM,
+            required=False,
+            items=openapi.Items(type=openapi.TYPE_FILE),
+            type=openapi.TYPE_ARRAY,
+            description='Files to upload (maximum 10 files allowed)'
+        )
+    ])
+    def update(self, request, *args, **kwargs):
+        log_info(f'{request.data = }')
+        instance = self.get_object()
+        files = []
+        data_files = []
+        files = request.FILES.getlist('files')
+        log_info(f'{files = }')
+        # for file in files:
+        #     log_info(f'{file = }')
+        #     if isinstance(file, str):
+        #         log_info(f'1 {file = }')
+        #         data_files.append(file)
+        #     else:
+        #         log_info(f'2 {file = }')
+        #         files.append(file)
+
+        # files = [file for file_name, file in request.FILES.items()]
+        
+        log_info(f'{files = }')
+        if files:
+            if len(files) > 10:
+                return Response({'error': 'Cannot upload more than 10 files'}, status=status.HTTP_400_BAD_REQUEST)
+            for old_file_path in instance.files:
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+            
+            for file in files:
+                file_path = os.path.join(settings.MEDIA_ROOT, 'template', file.name)
+                with open(file_path, 'wb') as f:
+                    for chunk in file.chunks():
+                        f.write(chunk)
+                data_files.append(file_path)
+            request.data['files'] = json.dumps(data_files)
+        else:
+            for old_file_path in instance.files:
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+            instance.files = json.dumps(data_files)
+            instance.save()
+        return super().update(request, *args, **kwargs)
 
 
 class EmailSMTPViewSet(viewsets.ViewSet):
@@ -1745,48 +1823,36 @@ class EmailSMTPViewSet(viewsets.ViewSet):
             email.save()
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], permission_classes=[IsMentor])
+    @action(detail=False, methods=['post'], permission_classes=[IsMentor], parser_classes=[MultiPartParser])
     @swagger_auto_schema(
-        request_body=openapi.Schema(
-            type=openapi.TYPE_OBJECT,
-            properties={
-                'mailbox_id': openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description='ID of the mailbox',
-                    example=1
-                ),
-                'recipients_email': openapi.Schema(
-                    type=openapi.TYPE_ARRAY,
-                    items=openapi.Schema(
-                        type=openapi.TYPE_STRING,
-                        description='Email address of the recipient',
-                        example='recipient@example.com'
-                    )
-                ),
-                'subject': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Subject of the email',
-                    example='Hello!'
-                ),
-                'body': openapi.Schema(
-                    type=openapi.TYPE_STRING,
-                    description='Body of the email',
-                    example='This is a test email.'
-                ),
-                'template_id': openapi.Schema(
-                    type=openapi.TYPE_INTEGER,
-                    description='ID of the template',
-                    example=1
-                ),
-            },
-            required=['mailbox_id', 'recipients_email', 'subject', 'body']
-        ),
-        responses={
-            201: openapi.Response(
-                description='Email successfully sent',
+        manual_parameters=[
+            openapi.Parameter(
+                'mailbox_id', openapi.IN_FORM, description='ID of the mailbox', type=openapi.TYPE_INTEGER, required=True, example=1
             ),
-            404: "Mailbox not found or method for sending message not found"
-        },
+            openapi.Parameter(
+                'recipients_email', openapi.IN_FORM, description='Email addresses of the recipients', type=openapi.TYPE_ARRAY,
+                items=openapi.Items(type=openapi.TYPE_STRING, example='recipient@example.com'), required=True
+            ),
+            openapi.Parameter(
+                'subject', openapi.IN_FORM, description='Subject of the email', type=openapi.TYPE_STRING, required=True, example='Hello!'
+            ),
+            openapi.Parameter(
+                'body', openapi.IN_FORM, description='Body of the email', type=openapi.TYPE_STRING, required=True, example='This is a test email.'
+            ),
+            openapi.Parameter(
+                'template_id', openapi.IN_FORM, description='ID of the template', type=openapi.TYPE_INTEGER, required=False, example=1
+            ),
+            openapi.Parameter(
+                'attachments', openapi.IN_FORM, description='File attachments', type=openapi.TYPE_ARRAY, 
+                items=openapi.Items(type=openapi.TYPE_FILE), required=False
+            ),
+        ],
+        responses={
+            201: openapi.Response(description='Email successfully sent'),
+            404: openapi.Response(description="Mailbox not found or method for sending message not found"),
+            403: openapi.Response(description="User not related to this course"),
+            400: openapi.Response(description="Validation error"),
+        }
     )
     def create_email(self, request):
         mailbox_id = request.data.get('mailbox_id')
@@ -1794,6 +1860,7 @@ class EmailSMTPViewSet(viewsets.ViewSet):
         subject = request.data.get('subject')
         body = request.data.get('body')
         template_id = request.data.get('template_id')
+        attachments = request.FILES.getlist('attachments')
 
         try:
             mailbox = models.Mailbox.objects.get(pk=mailbox_id)
@@ -1810,20 +1877,29 @@ class EmailSMTPViewSet(viewsets.ViewSet):
             not mailbox.courses.filter(user_course__user=request.user).exists()
         ):
             return Response({'message': 'Пользователь не связан с этим курсом'}, status=403)
-        if mailbox.provider == 'webmail':
-            email.send_email_webmail(body, subject, recipients_email, mailbox)
-        else:
-            return Response({'message': 'Метод для отправки сообщения не найден'}, status=404)
+        if not template or (template and not template.files):
+            attachment_paths = []
+        else :
+            attachment_paths = list(template.files)
+        for attachment in attachments:
+            media_root = settings.MEDIA_ROOT
+            attachment_path = os.path.join(media_root, 'files', f'{timezone.now().date()}_{attachment.name}')
+            with open(attachment_path, 'wb') as f:
+                for chunk in attachment.chunks():
+                    f.write(chunk)
+            attachment_paths.append(attachment_path)
+        email.send_email_webmail(body, subject, recipients_email, mailbox, attachments=attachment_paths)
         
         email_data_list = []
-        for recipient_email in recipients_email:
+        for recipient_email in recipients_email.split(","):
             email_data = {
                 'sender': mailbox.email,
                 'recipient': recipient_email,
                 'subject': subject,
                 'body': body,
                 'mailbox': mailbox.pk,
-                'template': template.pk
+                'template': template.pk,
+                'attachments': attachment_paths
             }
             email_data_list.append(email_data)
         serializer = serializers.EmailSMTPSerializer(data=email_data_list, many=True)
@@ -1866,6 +1942,7 @@ class EmailSMTPViewSet(viewsets.ViewSet):
             return Response({'message': 'Пользователь не связан с этим курсом'}, status=403)
 
         email_msg = models.EmailSMTP.objects.filter(recipient=mailbox.email, mailbox=mailbox).last()
+        log_info(f'{email_msg = }')
         if not email_msg:
             last_num = 0
         else:
@@ -2044,3 +2121,27 @@ class MailboxViewSet(viewsets.ViewSet):
         #     })
         # return Response(result)
 
+
+class GetFileAPIView(APIView):
+    permission_classes = [permissions.AllowAny,]
+
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'path_file': openapi.Schema(type=openapi.TYPE_STRING),
+            },
+            required=['data'],
+        ),
+        responses={200: 'Success', 400: 'Bad request'},
+    )
+    def post(self, request):
+        file_path = request.data.get('path_file', None)
+        log_info(f'{file_path = }')
+        if file_path:
+            if os.path.exists(file_path):
+                try:
+                    return FileResponse(open(file_path, 'rb'), as_attachment=True) 
+                except Exception as e:
+                    return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
