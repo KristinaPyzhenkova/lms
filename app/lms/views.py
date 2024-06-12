@@ -1766,16 +1766,10 @@ class TemplateViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         files = []
         data_files = []
-        files = request.FILES.getlist('files')
+        # files = request.FILES.getlist('files')
+        # log_info(f'{files = }')
+        files = request.data.getlist('files')
         log_info(f'{files = }')
-        # for file in files:
-        #     log_info(f'{file = }')
-        #     if isinstance(file, str):
-        #         log_info(f'1 {file = }')
-        #         data_files.append(file)
-        #     else:
-        #         log_info(f'2 {file = }')
-        #         files.append(file)
 
         # files = [file for file_name, file in request.FILES.items()]
         
@@ -1783,22 +1777,29 @@ class TemplateViewSet(viewsets.ModelViewSet):
         if files:
             if len(files) > 10:
                 return Response({'error': 'Cannot upload more than 10 files'}, status=status.HTTP_400_BAD_REQUEST)
-            for old_file_path in instance.files:
-                if os.path.exists(old_file_path):
-                    os.remove(old_file_path)
+            # for old_file_path in instance.files:
+            #     log_info(f'{old_file_path = }')
+            #     if os.path.exists(old_file_path):
+            #         os.remove(old_file_path)
             
             for file in files:
-                file_path = os.path.join(settings.MEDIA_ROOT, 'template', file.name)
-                with open(file_path, 'wb') as f:
-                    for chunk in file.chunks():
-                        f.write(chunk)
-                data_files.append(file_path)
-            request.data['files'] = json.dumps(data_files)
+                log_info(f'{isinstance(file, str) = } {file = }')
+                if isinstance(file, str):
+                    data_files.append(file)
+                else:
+                    file_path = os.path.join(settings.MEDIA_ROOT, 'template', file.name)
+                    with open(file_path, 'wb') as f:
+                        for chunk in file.chunks():
+                            f.write(chunk)
+                    data_files.append(file_path)
+            updated_data = request.data.dict().copy()
+            updated_data['files'] = json.dumps(list(set(data_files)))
+            request._full_data = updated_data
         else:
             for old_file_path in instance.files:
                 if os.path.exists(old_file_path):
                     os.remove(old_file_path)
-            instance.files = json.dumps(data_files)
+            instance.files = data_files
             instance.save()
         return super().update(request, *args, **kwargs)
 
@@ -1846,6 +1847,9 @@ class EmailSMTPViewSet(viewsets.ViewSet):
                 'attachments', openapi.IN_FORM, description='File attachments', type=openapi.TYPE_ARRAY, 
                 items=openapi.Items(type=openapi.TYPE_FILE), required=False
             ),
+            openapi.Parameter(
+                'id_inbox', openapi.IN_FORM, description='id_inbox', type=openapi.TYPE_INTEGER, required=False, example=33
+            ),
         ],
         responses={
             201: openapi.Response(description='Email successfully sent'),
@@ -1860,6 +1864,7 @@ class EmailSMTPViewSet(viewsets.ViewSet):
         subject = request.data.get('subject')
         body = request.data.get('body')
         template_id = request.data.get('template_id')
+        id_inbox = request.data.get('id_inbox')
         attachments = request.FILES.getlist('attachments')
 
         try:
@@ -1880,15 +1885,23 @@ class EmailSMTPViewSet(viewsets.ViewSet):
         if not template or (template and not template.files):
             attachment_paths = []
         else :
-            attachment_paths = list(template.files)
+            attachment_paths = json.loads(template.files)
+            log_info(f'{attachment_paths = }')
         for attachment in attachments:
             media_root = settings.MEDIA_ROOT
-            attachment_path = os.path.join(media_root, 'files', f'{timezone.now().date()}_{attachment.name}')
+            attachment_path = os.path.join(media_root, 'files', attachment.name)
             with open(attachment_path, 'wb') as f:
                 for chunk in attachment.chunks():
                     f.write(chunk)
             attachment_paths.append(attachment_path)
-        email.send_email_webmail(body, subject, recipients_email, mailbox, attachments=attachment_paths)
+        if id_inbox:
+            email_msg = models.EmailSMTP.objects.filter(id=int(id_inbox)).last()
+            log_info(f'{email_msg = }')
+            if not email_msg:
+                id_inbox = None
+            else:
+                id_inbox = email_msg.id_inbox
+        email.send_email_webmail(body, subject, recipients_email, mailbox, attachments=attachment_paths, in_reply_to=id_inbox)
         
         email_data_list = []
         for recipient_email in recipients_email.split(","):
@@ -1898,9 +1911,12 @@ class EmailSMTPViewSet(viewsets.ViewSet):
                 'subject': subject,
                 'body': body,
                 'mailbox': mailbox.pk,
-                'template': template.pk,
                 'attachments': attachment_paths
             }
+            if template:
+                email_data['template'] = template.pk
+            if id_inbox:
+                email_data['is_answer'] = True
             email_data_list.append(email_data)
         serializer = serializers.EmailSMTPSerializer(data=email_data_list, many=True)
         if serializer.is_valid():
@@ -1946,12 +1962,13 @@ class EmailSMTPViewSet(viewsets.ViewSet):
         if not email_msg:
             last_num = 0
         else:
-            last_num = int(email_msg.id_inbox)   
+            last_num = int(email_msg.id_inbox)
+        print(f'{last_num = }') 
         email.parsing_webmail(mailbox, last_num)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class MailboxViewSet(viewsets.ViewSet):
+class MailboxViewSet(viewsets.ModelViewSet):
     queryset = models.Mailbox.objects.all()
     serializer_class = serializers.MailboxSerializer
 
@@ -2069,7 +2086,7 @@ class MailboxViewSet(viewsets.ViewSet):
             all_email = models.EmailSMTP.objects.filter(recipient=email)
             unique_email = all_email.distinct().values_list(
                 'sender', flat=True
-            ).annotate(is_read_order=Max(is_read_ordering)).order_by('-is_read_order')
+            ).annotate(is_read_order=Max(is_read_ordering)).order_by('is_read_order')
             log_info(f'{unique_email = }')
             for sender_email in unique_email:
                 emails = all_email.filter(sender=sender_email).annotate(

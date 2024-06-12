@@ -516,7 +516,7 @@ class ListEmailSMTPSerializer(serializers.ModelSerializer):
 class MailboxSerializer(serializers.ModelSerializer):
     class Meta:
         model = models.Mailbox
-        fields = ['id', 'provider', 'email', 'password', 'courses']
+        fields = ['id', 'provider', 'email', 'password', 'courses', 'smtp_server']
 
     def to_representation(self, instance):
         """

@@ -48,7 +48,39 @@ def send_email_gmail(password_acc, email_personal, email_login):
         raise Exception(e)
 
 
-def send_email_webmail(html_msg, topic, recipients, mailbox, attachments=None):
+def get_message_id(email_message):
+    """Извлекает идентификатор сообщения из объекта email.message.EmailMessage"""
+    message_id, encoding = decode_header(email_message['Message-ID'])[0]
+    if encoding:
+        message_id = message_id.decode(encoding)
+    return message_id
+
+
+def get_previous_email(mailbox, email_id):
+    """Получает объект email.message.EmailMessage для предыдущего письма"""
+    try:
+        # Подключаемся к почтовому ящику
+        mail = imaplib.IMAP4_SSL(mailbox.smtp_server)
+        mail.login(mailbox.email, mailbox.password)
+
+        # Выбираем папку входящих сообщений
+        mail.select("inbox")
+
+        # Получаем текст письма по его идентификатору
+        _, data = mail.fetch(email_id, "(RFC822)")
+        raw_email = data[0][1]
+
+        # Создаем объект email.message.EmailMessage
+        previous_email = email.message_from_bytes(raw_email)
+
+        mail.logout()
+        return previous_email
+    except Exception as e:
+        log_info(f"Ошибка при получении предыдущего письма: {e}")
+        return None
+
+
+def send_email_webmail(html_msg, topic, recipients, mailbox, attachments=None, in_reply_to=None):
     try:
         server = smtp.SMTP_SSL(mailbox.smtp_server, 465)
         login_webmail = mailbox.email
@@ -57,12 +89,21 @@ def send_email_webmail(html_msg, topic, recipients, mailbox, attachments=None):
 
         msg = MIMEMultipart()
         msg.attach(MIMEText(html_msg, 'html'))
-        msg['Subject'] = topic
+        msg['Subject'] = topic if not in_reply_to else ' Re: ' + topic
         msg['From'] = login_webmail
         msg['To'] = recipients
+        log_info(f'{in_reply_to = }')
+        if in_reply_to:
+            previous_email = get_previous_email(mailbox, in_reply_to)
+            in_reply = get_message_id(previous_email)
+            log_info(f'{in_reply = }')
+            msg['References'] = in_reply
+            msg['In-Reply-To'] = in_reply
 
         if attachments:
+            log_info(f'{attachments = }')
             for file_path in attachments:
+                log_info(f'{file_path = }')
                 with open(file_path, 'rb') as f:
                     part = None
                     if file_path.lower().endswith('.pdf'):
